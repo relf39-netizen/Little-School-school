@@ -18,7 +18,13 @@ const GameSetup: React.FC<GameSetupProps> = ({ onBack, onGameCreated }) => {
   const [selectedSubject, setSelectedSubject] = useState<string>('MIXED'); 
   const [questionCount, setQuestionCount] = useState<number>(10);
   const [timePerQuestion, setTimePerQuestion] = useState<number>(20);
-  const [selectedGrade, setSelectedGrade] = useState<string>('P6'); // ✅ เพิ่มเลือกชั้น
+  const [selectedGrade, setSelectedGrade] = useState<string>('P6');
+
+  // ตัวแปลงรหัสชั้นเป็นภาษาไทย
+  const GRADE_LABELS: Record<string, string> = {
+      'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3',
+      'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6'
+  };
 
   useEffect(() => {
     const loadQuestions = async () => {
@@ -47,20 +53,38 @@ const GameSetup: React.FC<GameSetupProps> = ({ onBack, onGameCreated }) => {
     const finalQuestions = filtered.slice(0, questionCount);
 
     if (finalQuestions.length === 0) {
-        alert(`ไม่พบข้อสอบสำหรับชั้น ${selectedGrade} ในหมวดนี้`);
+        alert(`ไม่พบข้อสอบสำหรับชั้น ${GRADE_LABELS[selectedGrade]} ในหมวดนี้`);
         setLoading(false);
         return;
     }
 
+    // ✅ แก้ไข Error: แปลงค่า undefined ให้เป็นค่าว่างก่อนส่งไป Firebase
+    const sanitizedQuestions = finalQuestions.map(q => ({
+        id: q.id || '',
+        subject: q.subject || '',
+        text: q.text || '',
+        image: q.image || '',
+        choices: q.choices.map(c => ({
+            id: c.id || '',
+            text: c.text || '',
+            image: c.image || ''
+        })),
+        correctChoiceId: q.correctChoiceId || '',
+        explanation: q.explanation || '',
+        grade: q.grade || 'ALL',
+        school: q.school || 'CENTER' // ป้องกัน school เป็น undefined
+    }));
+
     try {
         await db.ref('game/scores').set({});
-        await db.ref('questions').set(finalQuestions);
+        await db.ref('questions').set(sanitizedQuestions); // ส่งตัวที่แก้แล้วไป
+        
         await db.ref('gameState').set({
             status: 'LOBBY',
             currentQuestionIndex: 0,
-            totalQuestions: finalQuestions.length,
+            totalQuestions: sanitizedQuestions.length,
             subject: selectedSubject === 'MIXED' ? 'รวมวิชา' : selectedSubject,
-            grade: selectedGrade, // บันทึกชั้น
+            grade: selectedGrade,
             timePerQuestion: timePerQuestion,
             timer: timePerQuestion
         });
@@ -68,6 +92,7 @@ const GameSetup: React.FC<GameSetupProps> = ({ onBack, onGameCreated }) => {
         onGameCreated(); 
     } catch (e) {
         alert("Firebase Error: " + e);
+        console.error(e);
     } finally {
         setLoading(false);
     }
@@ -86,13 +111,13 @@ const GameSetup: React.FC<GameSetupProps> = ({ onBack, onGameCreated }) => {
             </h2>
         </div>
 
-        {/* 0. เลือกระดับชั้น (สำคัญ) */}
+        {/* 0. เลือกระดับชั้น (ภาษาไทย) */}
         <div className="mb-6">
             <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><GraduationCap size={18}/> 0. เลือกระดับชั้น</label>
             <div className="grid grid-cols-3 gap-2">
                 {['P1','P2','P3','P4','P5','P6'].map(g => (
-                    <button key={g} onClick={() => setSelectedGrade(g)} className={`py-2 rounded-lg border-2 font-bold ${selectedGrade === g ? 'border-purple-500 bg-purple-100 text-purple-800' : 'border-gray-100'}`}>
-                        {g}
+                    <button key={g} onClick={() => setSelectedGrade(g)} className={`py-2 rounded-lg border-2 font-bold transition ${selectedGrade === g ? 'border-purple-500 bg-purple-100 text-purple-800 shadow-sm' : 'border-gray-100 hover:bg-gray-50'}`}>
+                        {GRADE_LABELS[g]}
                     </button>
                 ))}
             </div>
