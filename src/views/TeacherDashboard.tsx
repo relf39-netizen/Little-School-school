@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Teacher, Student, Subject, Assignment, Question } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, ExternalLink, Gamepad2, Calendar, Eye, CheckCircle, X, Clock, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, LayoutGrid, Users, GraduationCap } from 'lucide-react';
-import { getTeacherDashboard, addStudent, addAssignment, addQuestion } from '../services/api';
+import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, ExternalLink, Gamepad2, Calendar, Eye, CheckCircle, X, Clock, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, Users, GraduationCap, Trash2, Edit, Shield } from 'lucide-react';
+import { getTeacherDashboard, addStudent, addAssignment, addQuestion, manageTeacher } from '../services/api';
 
 interface TeacherDashboardProps {
   teacher: Teacher;
@@ -12,28 +12,29 @@ interface TeacherDashboardProps {
 const ADD_QUESTION_URL = 'https://script.google.com/macros/s/AKfycbx3EwKuxf1L7_iYqoCLCpfHQlu8FyPL9ty8n4oJlSuInj9sMcsSFjQyw39--V2-gQ8U/exec';
 
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, onStartGame }) => {
-  // เปลี่ยน default เป็น 'menu' เพื่อโชว์หน้าปุ่มกดก่อน
-  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'stats' | 'questions' | 'assignments'>('menu');
+  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'stats' | 'questions' | 'assignments' | 'teachers'>('menu');
   
+  // ... (State เดิมทั้งหมดคงเดิม)
   const [students, setStudents] = useState<Student[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [stats, setStats] = useState<any[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]); 
   const [loading, setLoading] = useState(true);
   
-  // Student Form
+  // Teacher Management State (New)
+  const [allTeachers, setAllTeachers] = useState<Teacher[]>([]);
+  const [tForm, setTForm] = useState({ id: '', username: '', password: '', name: '', school: '', role: 'TEACHER', gradeLevel: 'ALL' });
+  const [isEditingTeacher, setIsEditingTeacher] = useState(false);
+
+  // ... (State เดิม: Student Form, Assignment Form, Question Form)
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentAvatar, setNewStudentAvatar] = useState('👦');
   const [newStudentGrade, setNewStudentGrade] = useState('P6'); 
   const [createdStudent, setCreatedStudent] = useState<Student | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-
-  // Assignment Form
   const [assignSubject, setAssignSubject] = useState<Subject>(Subject.MATH);
   const [assignCount, setAssignCount] = useState(10);
   const [assignDeadline, setAssignDeadline] = useState('');
-
-  // Question Form
   const [qSubject, setQSubject] = useState<Subject>(Subject.MATH);
   const [qGrade, setQGrade] = useState('P6');
   const [qText, setQText] = useState('');
@@ -41,13 +42,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const [qChoices, setQChoices] = useState({c1:'', c2:'', c3:'', c4:''});
   const [qCorrect, setQCorrect] = useState('1');
   const [qExplain, setQExplain] = useState('');
-
-  // Question Bank State
   const [qBankSubject, setQBankSubject] = useState<Subject | null>(null); 
   const [qBankPage, setQBankPage] = useState(1);
   const ITEMS_PER_PAGE = 5;
-
-  // Modal State
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
 
   useEffect(() => {
@@ -61,9 +58,59 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     setStats(data.results || []);
     setAssignments(data.assignments || []); 
     setQuestions(data.questions || []); 
+    
+    // ถ้าเป็น Admin ให้โหลดรายชื่อครูด้วย (ต้องเพิ่ม API นี้ในอนาคต หรือใช้ช่องทางพิเศษ)
+    // ในที่นี้เราจะใช้ฟังก์ชันแยก loadTeachers() เมื่อเข้าแท็บ teachers
     setLoading(false);
   };
 
+  // ฟังก์ชันโหลดครู
+  const loadTeachers = async () => {
+      if (teacher.role !== 'ADMIN') return;
+      setLoading(true);
+      try {
+          const response = await fetch(`${ADD_QUESTION_URL}?type=get_teachers`);
+          const data = await response.json();
+          setAllTeachers(data);
+      } catch (e) {
+          console.error(e);
+      }
+      setLoading(false);
+  };
+
+  // ฟังก์ชันจัดการครู
+  const handleSaveTeacher = async () => {
+      if (!tForm.username || !tForm.password || !tForm.name) return alert('กรุณากรอกข้อมูลให้ครบ');
+      setIsSaving(true);
+      
+      const action = isEditingTeacher ? 'edit' : 'add';
+      const res = await manageTeacher({ ...tForm, action });
+      
+      if (res.success) {
+          alert(isEditingTeacher ? 'แก้ไขข้อมูลสำเร็จ' : 'เพิ่มครูสำเร็จ');
+          setTForm({ id: '', username: '', password: '', name: '', school: '', role: 'TEACHER', gradeLevel: 'ALL' });
+          setIsEditingTeacher(false);
+          loadTeachers();
+      } else {
+          alert('เกิดข้อผิดพลาด: ' + res.message);
+      }
+      setIsSaving(false);
+  };
+
+  const handleDeleteTeacher = async (id: number) => {
+      if (!confirm('ต้องการลบรายชื่อครูท่านนี้ใช่หรือไม่?')) return;
+      setIsSaving(true);
+      const res = await manageTeacher({ id, action: 'delete' });
+      if (res.success) {
+          alert('ลบสำเร็จ');
+          loadTeachers();
+      } else {
+          alert('ลบไม่สำเร็จ');
+      }
+      setIsSaving(false);
+  };
+
+  // ... (ฟังก์ชันเดิม handleAddStudent, handleCreateAssignment, handleAddQuestion etc.) ...
   const handleAddStudent = async () => {
     if (!newStudentName) return;
     setIsSaving(true);
@@ -75,158 +122,137 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     } else { alert('เกิดข้อผิดพลาดในการบันทึก'); }
     setIsSaving(false);
   };
-
   const handleCreateAssignment = async () => {
     if (!assignDeadline) return alert('กรุณาเลือกวันกำหนดส่ง');
     setIsSaving(true);
     const success = await addAssignment(teacher.school, assignSubject, assignCount, assignDeadline, teacher.name);
-    if (success) {
-      alert('✅ สั่งการบ้านเรียบร้อยแล้ว');
-      setAssignDeadline('');
-      const data = await getTeacherDashboard(teacher.school);
-      setAssignments(data.assignments || []);
-    } else { alert('เกิดข้อผิดพลาด'); }
+    if (success) { alert('✅ สั่งการบ้านเรียบร้อยแล้ว'); setAssignDeadline(''); const data = await getTeacherDashboard(teacher.school); setAssignments(data.assignments || []); } else { alert('เกิดข้อผิดพลาด'); }
     setIsSaving(false);
   };
-
   const handleAddQuestion = async () => {
     if (!qText || !qChoices.c1 || !qChoices.c2) return alert('กรุณากรอกข้อมูลให้ครบถ้วน');
     setIsSaving(true);
-    const success = await addQuestion({
-        subject: qSubject, grade: qGrade, text: qText, image: qImage,
-        c1: qChoices.c1, c2: qChoices.c2, c3: qChoices.c3, c4: qChoices.c4,
-        correct: qCorrect, explanation: qExplain, school: teacher.school
-    });
-    if (success) {
-        alert('✅ บันทึกข้อสอบเรียบร้อยแล้ว');
-        setQText(''); setQChoices({c1:'', c2:'', c3:'', c4:''}); setQExplain('');
-        const data = await getTeacherDashboard(teacher.school);
-        setQuestions(data.questions || []);
-    } else { alert('บันทึกไม่สำเร็จ'); }
+    const success = await addQuestion({ subject: qSubject, grade: qGrade, text: qText, image: qImage, c1: qChoices.c1, c2: qChoices.c2, c3: qChoices.c3, c4: qChoices.c4, correct: qCorrect, explanation: qExplain, school: teacher.school });
+    if (success) { alert('✅ บันทึกข้อสอบเรียบร้อยแล้ว'); setQText(''); setQChoices({c1:'', c2:'', c3:'', c4:''}); setQExplain(''); const data = await getTeacherDashboard(teacher.school); setQuestions(data.questions || []); } else { alert('บันทึกไม่สำเร็จ'); }
     setIsSaving(false);
   };
-
-  const getStudentScore = (studentId: string) => {
-    const studentResults = stats.filter(r => String(r.studentId) === String(studentId));
-    if (studentResults.length === 0) return null;
-    return studentResults[studentResults.length - 1];
-  };
-
-  const countSubmitted = (assignmentId: string) => {
-      const submittedStudentIds = new Set(stats.filter(r => r.assignmentId === assignmentId).map(r => r.studentId));
-      return submittedStudentIds.size;
-  };
-
+  const getStudentScore = (studentId: string) => { const studentResults = stats.filter(r => String(r.studentId) === String(studentId)); if (studentResults.length === 0) return null; return studentResults[studentResults.length - 1]; };
+  const countSubmitted = (assignmentId: string) => { const submittedStudentIds = new Set(stats.filter(r => r.assignmentId === assignmentId).map(r => r.studentId)); return submittedStudentIds.size; };
   const GRADES = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
-
-  // --- Question Bank Logic ---
-  const getFilteredQuestions = () => {
-    if (!qBankSubject) return [];
-    return questions.filter(q => {
-        if (q.subject !== qBankSubject) return false;
-        if (!teacher.gradeLevel || teacher.gradeLevel === 'ALL') return true;
-        if (q.grade === 'ALL') return true;
-        return q.grade === teacher.gradeLevel;
-    });
-  };
+  const getFilteredQuestions = () => { if (!qBankSubject) return []; return questions.filter(q => { if (q.subject !== qBankSubject) return false; if (!teacher.gradeLevel || teacher.gradeLevel === 'ALL') return true; if (q.grade === 'ALL') return true; return q.grade === teacher.gradeLevel; }); };
   const filteredQuestions = getFilteredQuestions();
   const totalPages = Math.ceil(filteredQuestions.length / ITEMS_PER_PAGE);
   const currentQuestions = filteredQuestions.slice((qBankPage - 1) * ITEMS_PER_PAGE, qBankPage * ITEMS_PER_PAGE);
 
   return (
     <div className="max-w-6xl mx-auto pb-20">
-      {/* Header */}
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6 rounded-b-3xl md:rounded-3xl shadow-lg mb-8 flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <GraduationCap size={28} /> ห้องพักครู
-          </h2>
-          <p className="opacity-90 text-sm mt-1">{teacher.school} • คุณครู{teacher.name} {teacher.gradeLevel && `(ชั้น ${teacher.gradeLevel})`}</p>
+          <h2 className="text-2xl font-bold flex items-center gap-2"><GraduationCap size={28} /> ห้องพักครู</h2>
+          <p className="opacity-90 text-sm mt-1">{teacher.school} • คุณครู{teacher.name} {teacher.role === 'ADMIN' && '⭐(Admin)'}</p>
         </div>
-        <button onClick={onLogout} className="bg-white/20 hover:bg-white/30 p-2 rounded-xl transition backdrop-blur-sm">
-            <LogOut size={20} />
-        </button>
+        <button onClick={onLogout} className="bg-white/20 hover:bg-white/30 p-2 rounded-xl transition backdrop-blur-sm"><LogOut size={20} /></button>
       </div>
 
-      {/* 1. MENU GRID (หน้าหลัก) */}
       {activeTab === 'menu' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4 md:px-0">
-            {/* ปุ่มจัดการนักเรียน */}
-            <MenuCard 
-                icon={<UserPlus size={40} />}
-                title="จัดการนักเรียน"
-                desc="ลงทะเบียนนักเรียนใหม่ แก้ไขข้อมูล"
-                color="bg-purple-50 text-purple-600 border-purple-200 hover:border-purple-500"
-                onClick={() => setActiveTab('students')}
-            />
-            {/* ปุ่มสั่งการบ้าน */}
-            <MenuCard 
-                icon={<Calendar size={40} />}
-                title="สั่งการบ้าน"
-                desc="มอบหมายงานและติดตามการส่งงาน"
-                color="bg-orange-50 text-orange-600 border-orange-200 hover:border-orange-500"
-                onClick={() => setActiveTab('assignments')}
-            />
-            {/* ปุ่มดูคะแนน */}
-            <MenuCard 
-                icon={<BarChart2 size={40} />}
-                title="ดูผลคะแนน"
-                desc="สถิติการสอบและพัฒนาการนักเรียน"
-                color="bg-green-50 text-green-600 border-green-200 hover:border-green-500"
-                onClick={() => setActiveTab('stats')}
-            />
-            {/* ปุ่มคลังข้อสอบ */}
-            <MenuCard 
-                icon={<FileText size={40} />}
-                title="คลังข้อสอบ"
-                desc="เพิ่มข้อสอบใหม่ และจัดการคลังข้อสอบ"
-                color="bg-blue-50 text-blue-600 border-blue-200 hover:border-blue-500"
-                onClick={() => setActiveTab('questions')}
-            />
-            {/* ปุ่มจัดกิจกรรมเกม */}
-            <MenuCard 
-                icon={<Gamepad2 size={40} />}
-                title="จัดกิจกรรมเกม"
-                desc="เปิดห้องแข่งขันเกมตอบคำถาม Real-time"
-                color="bg-pink-50 text-pink-600 border-pink-200 hover:border-pink-500"
-                onClick={onStartGame} // ลิงก์ไปหน้าเริ่มเกมเลย
-            />
+            <MenuCard icon={<UserPlus size={40} />} title="จัดการนักเรียน" desc="ลงทะเบียนนักเรียนใหม่" color="bg-purple-50 text-purple-600 border-purple-200" onClick={() => setActiveTab('students')} />
+            <MenuCard icon={<Calendar size={40} />} title="สั่งการบ้าน" desc="มอบหมายงานและติดตาม" color="bg-orange-50 text-orange-600 border-orange-200" onClick={() => setActiveTab('assignments')} />
+            <MenuCard icon={<BarChart2 size={40} />} title="ดูผลคะแนน" desc="สถิติการสอบ" color="bg-green-50 text-green-600 border-green-200" onClick={() => setActiveTab('stats')} />
+            <MenuCard icon={<FileText size={40} />} title="คลังข้อสอบ" desc="เพิ่มและจัดการข้อสอบ" color="bg-blue-50 text-blue-600 border-blue-200" onClick={() => setActiveTab('questions')} />
+            <MenuCard icon={<Gamepad2 size={40} />} title="จัดกิจกรรมเกม" desc="เปิดห้องแข่งขัน Real-time" color="bg-pink-50 text-pink-600 border-pink-200" onClick={onStartGame} />
+            {teacher.role === 'ADMIN' && (
+                <MenuCard icon={<Shield size={40} />} title="จัดการระบบครู" desc="เพิ่ม/ลบ รายชื่อครู" color="bg-slate-50 text-slate-600 border-slate-200" onClick={() => { setActiveTab('teachers'); loadTeachers(); }} />
+            )}
         </div>
       )}
 
-      {/* CONTENT SECTIONS (หน้ารายละเอียด) */}
       {activeTab !== 'menu' && (
         <div className="bg-white rounded-3xl shadow-sm p-4 md:p-6 min-h-[400px] relative animate-fade-in">
+            <button onClick={() => setActiveTab('menu')} className="mb-6 flex items-center gap-2 text-gray-500 hover:text-purple-600 font-bold transition-colors"><div className="bg-gray-100 p-2 rounded-full"><ArrowLeft size={20} /></div> กลับเมนูหลัก</button>
             
-            {/* ปุ่มย้อนกลับ */}
-            <button 
-                onClick={() => setActiveTab('menu')}
-                className="mb-6 flex items-center gap-2 text-gray-500 hover:text-purple-600 font-bold transition-colors"
-            >
-                <div className="bg-gray-100 p-2 rounded-full"><ArrowLeft size={20} /></div>
-                กลับเมนูหลัก
-            </button>
-            
-            {/* --- Tab: Students --- */}
-            {activeTab === 'students' && (
-            <div className="grid md:grid-cols-2 gap-8">
+            {/* Tab: Teachers (Admin Only) */}
+            {activeTab === 'teachers' && teacher.role === 'ADMIN' && (
                 <div>
-                <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><UserPlus className="text-purple-600"/> ลงทะเบียนนักเรียนใหม่</h3>
-                <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200">
+                    <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Shield className="text-slate-600"/> จัดการข้อมูลครู</h3>
+                    
+                    <div className="grid md:grid-cols-3 gap-6">
+                        {/* Form */}
+                        <div className="md:col-span-1 bg-slate-50 p-6 rounded-2xl border border-slate-200 h-fit">
+                            <h4 className="font-bold text-gray-700 mb-4">{isEditingTeacher ? '✏️ แก้ไขข้อมูล' : '➕ เพิ่มครูใหม่'}</h4>
+                            <div className="space-y-3">
+                                <input type="text" placeholder="Username (เข้าสู่ระบบ)" value={tForm.username} onChange={e=>setTForm({...tForm, username:e.target.value})} className="w-full p-2 border rounded-lg"/>
+                                <input type="text" placeholder="Password" value={tForm.password} onChange={e=>setTForm({...tForm, password:e.target.value})} className="w-full p-2 border rounded-lg"/>
+                                <input type="text" placeholder="ชื่อ-นามสกุล" value={tForm.name} onChange={e=>setTForm({...tForm, name:e.target.value})} className="w-full p-2 border rounded-lg"/>
+                                <input type="text" placeholder="โรงเรียน" value={tForm.school} onChange={e=>setTForm({...tForm, school:e.target.value})} className="w-full p-2 border rounded-lg"/>
+                                
+                                <div className="grid grid-cols-2 gap-2">
+                                    <select value={tForm.role} onChange={e=>setTForm({...tForm, role:e.target.value})} className="p-2 border rounded-lg">
+                                        <option value="TEACHER">ครูทั่วไป</option>
+                                        <option value="ADMIN">ผู้ดูแลระบบ</option>
+                                    </select>
+                                    <select value={tForm.gradeLevel} onChange={e=>setTForm({...tForm, gradeLevel:e.target.value})} className="p-2 border rounded-lg">
+                                        <option value="ALL">ทุกชั้น</option>
+                                        <option value="P1">ป.1</option><option value="P2">ป.2</option>
+                                        <option value="P3">ป.3</option><option value="P4">ป.4</option>
+                                        <option value="P5">ป.5</option><option value="P6">ป.6</option>
+                                    </select>
+                                </div>
+
+                                <div className="flex gap-2 pt-2">
+                                    {isEditingTeacher && <button onClick={()=>{setIsEditingTeacher(false); setTForm({ id: '', username: '', password: '', name: '', school: '', role: 'TEACHER', gradeLevel: 'ALL' });}} className="bg-gray-200 px-4 py-2 rounded-lg text-sm">ยกเลิก</button>}
+                                    <button onClick={handleSaveTeacher} disabled={isSaving} className="flex-1 bg-slate-700 text-white px-4 py-2 rounded-lg font-bold shadow hover:bg-slate-800">{isSaving ? '...' : 'บันทึก'}</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* List */}
+                        <div className="md:col-span-2 overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-100 text-slate-700">
+                                    <tr><th className="p-3 rounded-l-lg">ชื่อ</th><th className="p-3">User</th><th className="p-3">Pass</th><th className="p-3">โรงเรียน</th><th className="p-3">สิทธิ์</th><th className="p-3 rounded-r-lg">จัดการ</th></tr>
+                                </thead>
+                                <tbody>
+                                    {allTeachers.map((t) => (
+                                        <tr key={t.id} className="border-b hover:bg-slate-50">
+                                            <td className="p-3 font-bold">{t.name}</td>
+                                            <td className="p-3 text-gray-500">{t.username}</td>
+                                            <td className="p-3 text-gray-400">••••</td>
+                                            <td className="p-3">{t.school}</td>
+                                            <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${t.role==='ADMIN'?'bg-red-100 text-red-700':'bg-blue-100 text-blue-700'}`}>{t.role}</span></td>
+                                            <td className="p-3 flex gap-2">
+                                                <button onClick={()=>{setIsEditingTeacher(true); setTForm(t as any);}} className="text-blue-600 hover:bg-blue-50 p-1 rounded"><Edit size={16}/></button>
+                                                <button onClick={()=>handleDeleteTeacher(t.id!)} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ... (Tabs อื่นๆ students, assignments, stats, questions คงเดิม) ... */}
+            {activeTab === 'students' && (
+              <div className="grid md:grid-cols-2 gap-8">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800 mb-4">ลงทะเบียนนักเรียนใหม่</h3>
+                  <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200">
                     <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-900 mb-2">ระดับชั้น</label>
-                        <select value={newStudentGrade} onChange={(e)=>setNewStudentGrade(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl bg-white text-gray-900 focus:ring-2 focus:ring-purple-200">
+                        <label className="block text-sm font-medium text-gray-600 mb-2">ระดับชั้น</label>
+                        <select value={newStudentGrade} onChange={(e)=>setNewStudentGrade(e.target.value)} className="w-full p-3 border rounded-xl bg-white text-gray-900">
                             {GRADES.map(g => <option key={g} value={g}>{g}</option>)}
                         </select>
                     </div>
-                    <label className="block text-sm font-medium text-gray-900 mb-2">ชื่อ-นามสกุล</label>
-                    <input type="text" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl mb-4 focus:ring-2 focus:ring-purple-200 outline-none text-gray-900 bg-white" placeholder="ด.ช. มานะ อดทน" />
-                    
-                    <label className="block text-sm font-medium text-gray-900 mb-2">รูปแทนตัว</label>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">ชื่อ-นามสกุล</label>
+                    <input type="text" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} className="w-full p-3 border rounded-xl mb-4 focus:ring-2 focus:ring-purple-200 outline-none text-gray-800 bg-white" placeholder="ด.ช. มานะ อดทน" />
+                    <div className="bg-purple-50 p-3 rounded-xl mb-4 border border-purple-100"><span className="text-xs text-purple-600 font-bold uppercase">สังกัดโรงเรียน</span><p className="text-gray-800 font-medium truncate">{teacher.school}</p></div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">รูปแทนตัว</label>
                     <div className="flex gap-2 mb-6 overflow-x-auto py-1">{['👦','👧','🧒','🧑','👓','🦄','🦁','🐼'].map(emoji => (<button key={emoji} onClick={() => setNewStudentAvatar(emoji)} className={`text-2xl p-2 rounded-lg border-2 transition ${newStudentAvatar === emoji ? 'border-purple-500 bg-purple-50' : 'border-transparent hover:bg-gray-200'}`}>{emoji}</button>))}</div>
                     <button onClick={handleAddStudent} disabled={isSaving || !newStudentName} className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center gap-2">{isSaving ? 'กำลังบันทึก...' : <><Save size={18} /> บันทึกข้อมูล</>}</button>
-                </div>
-                <div className="mt-6">
+                  </div>
+                  <div className="mt-6">
                     <div className="flex justify-between items-center mb-2"><h4 className="text-sm font-bold text-gray-500">รายชื่อนักเรียน ({students.length})</h4><button onClick={loadData} className="text-purple-600 hover:bg-purple-50 p-1 rounded"><RefreshCw size={14}/></button></div>
                     <div className="max-h-60 overflow-y-auto border border-gray-100 rounded-xl bg-white">
                         {students.map(s => (
@@ -240,12 +266,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             </div>
                         ))}
                     </div>
-                </div>
+                  </div>
                 </div>
                 <div className="flex flex-col items-center justify-center mt-6 md:mt-0">
-                {createdStudent ? (
+                  {createdStudent ? (
                     <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-1 rounded-3xl shadow-2xl w-full max-w-xs animate-fade-in scale-100 transition-transform">
-                    <div className="bg-white rounded-[22px] p-6 text-center relative overflow-hidden">
+                      <div className="bg-white rounded-[22px] p-6 text-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-400 to-purple-500"></div>
                         <h4 className="text-gray-500 text-xs uppercase tracking-widest font-bold mb-4">บัตรประจำตัวนักเรียน</h4>
                         <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-6xl mx-auto mb-4 shadow-inner">{createdStudent.avatar}</div>
@@ -255,19 +281,17 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             <span className="text-gray-500 text-xs">{createdStudent.school}</span>
                         </div>
                         <div className="bg-gray-100 rounded-xl p-3 mb-2"><span className="block text-xs text-gray-400 mb-1">รหัสเข้าใช้งาน (ID)</span><span className="text-3xl font-mono font-black text-purple-600 tracking-widest">{createdStudent.id}</span></div>
+                      </div>
+                      <div className="text-center mt-4"><button onClick={() => setCreatedStudent(null)} className="text-white/90 text-sm font-bold underline hover:text-white">+ เพิ่มคนต่อไป</button></div>
                     </div>
-                    <div className="text-center mt-4"><button onClick={() => setCreatedStudent(null)} className="text-white/90 text-sm font-bold underline hover:text-white">+ เพิ่มคนต่อไป</button></div>
-                    </div>
-                ) : (<div className="text-center text-gray-400"><div className="bg-gray-100 w-32 h-48 rounded-xl mx-auto mb-4 border-2 border-dashed border-gray-300 flex items-center justify-center"><UserPlus size={40} className="opacity-20" /></div><p>กรอกชื่อด้านซ้ายเพื่อสร้างรหัส</p></div>)}
+                  ) : (<div className="text-center text-gray-400"><div className="bg-gray-100 w-32 h-48 rounded-xl mx-auto mb-4 border-2 border-dashed border-gray-300 flex items-center justify-center"><UserPlus size={40} className="opacity-20" /></div><p>กรอกชื่อด้านซ้ายเพื่อสร้างรหัส</p></div>)}
                 </div>
-            </div>
+              </div>
             )}
-
-            {/* Tab: Assignments */}
             {activeTab === 'assignments' && (
-            <div className="max-w-4xl mx-auto">
-                <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 mb-8">
-                    <h4 className="font-bold text-xl text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-orange-500"/> สั่งงานใหม่</h4>
+              <div className="max-w-4xl mx-auto">
+                 <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 mb-8">
+                    <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-orange-500"/> สั่งงานใหม่</h4>
                     <div className="grid md:grid-cols-4 gap-4">
                         <div>
                             <label className="text-xs font-bold text-gray-500 block mb-1">วิชา</label>
@@ -289,156 +313,149 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             </button>
                         </div>
                     </div>
-                </div>
-
-                <div className="flex justify-between items-center mb-4">
+                 </div>
+    
+                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-bold text-gray-800">รายการการบ้านที่สั่งแล้ว ({assignments.length})</h3>
                     <button onClick={loadData} className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-lg text-gray-600 flex items-center gap-1"><RefreshCw size={14}/> รีเฟรช</button>
-                </div>
-                
-                {assignments.length === 0 ? (
-                    <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-xl">ยังไม่มีการบ้าน</div>
-                ) : (
-                    <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-orange-50 text-orange-900">
-                                <tr><th className="p-3">วิชา</th><th className="p-3 text-center">จำนวนข้อ</th><th className="p-3">กำหนดส่ง</th><th className="p-3 text-center">คนส่งแล้ว</th><th className="p-3 text-right">จัดการ</th></tr>
-                            </thead>
-                            <tbody>
-                                {assignments.slice().reverse().map((a) => {
-                                    const submittedCount = countSubmitted(a.id);
-                                    const isExpired = new Date(a.deadline) < new Date();
-                                    return (
-                                        <tr key={a.id} className="border-b hover:bg-gray-50 last:border-0">
-                                            <td className="p-3 font-bold text-gray-900">{a.subject}</td>
-                                            <td className="p-3 text-center text-gray-900">{a.questionCount}</td>
-                                            <td className={`p-3 font-medium ${isExpired ? 'text-red-600' : 'text-gray-900'}`}>
-                                                {a.deadline} {isExpired && '(หมดเขต)'}
-                                            </td>
-                                            <td className="p-3 text-center">
-                                                <span className={`px-2 py-1 rounded-full font-bold text-xs ${submittedCount > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
-                                                    {submittedCount} คน
-                                                </span>
-                                            </td>
-                                            <td className="p-3 text-right">
-                                                <button onClick={() => setSelectedAssignment(a)} className="bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 ml-auto border border-blue-200">
-                                                    <Eye size={14} /> ดูรายละเอียด
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
+                 </div>
+                 {assignments.length === 0 ? (
+                     <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-xl">ยังไม่มีการบ้าน</div>
+                 ) : (
+                     <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200">
+                         <table className="w-full text-sm text-left">
+                             <thead className="bg-orange-50 text-orange-900">
+                                 <tr><th className="p-3">วิชา</th><th className="p-3 text-center">จำนวนข้อ</th><th className="p-3">กำหนดส่ง</th><th className="p-3 text-center">คนส่งแล้ว</th><th className="p-3 text-right">จัดการ</th></tr>
+                             </thead>
+                             <tbody>
+                                 {assignments.slice().reverse().map((a) => {
+                                     const submittedCount = countSubmitted(a.id);
+                                     const isExpired = new Date(a.deadline) < new Date();
+                                     return (
+                                         <tr key={a.id} className="border-b hover:bg-gray-50 last:border-0">
+                                             <td className="p-3 font-bold text-gray-900">{a.subject}</td>
+                                             <td className="p-3 text-center text-gray-900">{a.questionCount}</td>
+                                             <td className={`p-3 font-medium ${isExpired ? 'text-red-600' : 'text-gray-900'}`}>
+                                                 {a.deadline} {isExpired && '(หมดเขต)'}
+                                             </td>
+                                             <td className="p-3 text-center">
+                                                 <span className={`px-2 py-1 rounded-full font-bold text-xs ${submittedCount > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+                                                     {submittedCount} คน
+                                                 </span>
+                                             </td>
+                                             <td className="p-3 text-right">
+                                                 <button onClick={() => setSelectedAssignment(a)} className="bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 ml-auto border border-blue-200">
+                                                     <Eye size={14} /> ดูรายละเอียด
+                                                 </button>
+                                             </td>
+                                         </tr>
+                                     );
+                                 })}
+                             </tbody>
+                         </table>
+                     </div>
+                 )}
+              </div>
             )}
-
-            {/* Tab: Stats */}
             {activeTab === 'stats' && (
-            <div>
+              <div>
                 <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2"><BarChart2 className="text-green-600"/> ผลการเรียนของนักเรียน ({students.length} คน)</h3>
-                <button onClick={loadData} className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-lg text-gray-600 flex items-center gap-1"><RefreshCw size={14}/> รีเฟรช</button>
+                  <h3 className="text-lg font-bold text-gray-800">ผลการเรียนของนักเรียน ({students.length} คน)</h3>
+                  <button onClick={loadData} className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-lg text-gray-600 flex items-center gap-1"><RefreshCw size={14}/> รีเฟรช</button>
                 </div>
                 {loading ? <div className="text-center py-10 text-gray-400">กำลังโหลด...</div> : (
-                <div className="overflow-x-auto bg-white rounded-2xl shadow-sm border border-gray-200">
+                  <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm border-collapse">
-                    <thead className="bg-purple-50 text-purple-900 border-b border-purple-100">
+                      <thead className="bg-purple-50 text-purple-900 border-b border-purple-100">
                         <tr><th className="p-4 rounded-tl-xl w-20 text-center">รูป</th><th className="p-4">ข้อมูลนักเรียน</th><th className="p-4 text-center">สถานะ</th><th className="p-4 rounded-tr-xl text-right">คะแนนล่าสุด</th></tr>
-                    </thead>
-                    <tbody>
+                      </thead>
+                      <tbody>
                         {students.map(s => {
-                        const score = getStudentScore(s.id);
-                        return (
+                          const score = getStudentScore(s.id);
+                          return (
                             <tr key={s.id} className="border-b hover:bg-gray-50 transition-colors">
-                            <td className="p-3 text-center"><div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center text-3xl mx-auto">{s.avatar || '👤'}</div></td>
-                            <td className="p-3 align-middle"><div className="font-bold text-gray-900 text-base mb-1">{s.name}</div><span className="text-xs text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded">ID: {s.id}</span></td>
-                            <td className="p-3 text-center align-middle">{score ? <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800 border border-green-200">สอบแล้ว</span> : <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-500 border border-gray-200">ยังไม่สอบ</span>}</td>
-                            <td className="p-3 text-right align-middle">{score ? <div><span className="text-xl font-bold text-purple-700">{score.score}</span><span className="text-gray-500 text-sm">/{score.total}</span></div> : <span className="text-gray-300">-</span>}</td>
+                              <td className="p-3 text-center"><div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center text-3xl mx-auto">{s.avatar || '👤'}</div></td>
+                              <td className="p-3 align-middle"><div className="font-bold text-gray-900 text-base mb-1">{s.name}</div><span className="text-xs text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded">ID: {s.id}</span></td>
+                              <td className="p-3 text-center align-middle">{score ? <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800 border border-green-200">สอบแล้ว</span> : <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-500 border border-gray-200">ยังไม่สอบ</span>}</td>
+                              <td className="p-3 text-right align-middle">{score ? <div><span className="text-xl font-bold text-purple-700">{score.score}</span><span className="text-gray-500 text-sm">/{score.total}</span></div> : <span className="text-gray-300">-</span>}</td>
                             </tr>
-                        )
+                          )
                         })}
-                    </tbody>
+                      </tbody>
                     </table>
-                </div>
+                  </div>
                 )}
-            </div>
+              </div>
             )}
-            
-            {/* Tab: Question Bank */}
             {activeTab === 'questions' && (
-            <div className="max-w-6xl mx-auto">
-                
-                <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+               <div className="max-w-6xl mx-auto">
+                  <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                         <FileText className="text-blue-600" /> คลังข้อสอบ 
                         <span className="text-sm font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                        แสดงเฉพาะชั้น {teacher.gradeLevel || 'ทั้งหมด'}
+                          แสดงเฉพาะชั้น {teacher.gradeLevel || 'ทั้งหมด'}
                         </span>
-                    </h3>
-                    <div className="flex gap-2">
-                        <a href={ADD_QUESTION_URL} target="_blank" rel="noopener noreferrer" className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition border">
-                            <ExternalLink size={16} /> ระบบเก่า (Admin)
-                        </a>
-                    </div>
-                </div>
-
-                {/* Form เพิ่มข้อสอบ */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-8">
-                    <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2">➕ เพิ่มข้อสอบใหม่ด่วน</h4>
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div>
+                      </h3>
+                      <div className="flex gap-2">
+                         <a href={ADD_QUESTION_URL} target="_blank" rel="noopener noreferrer" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition">
+                             <PlusCircle size={16} /> จัดการข้อสอบ (Admin)
+                         </a>
+                      </div>
+                  </div>
+                  {/* Form เพิ่มข้อสอบ */}
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-8">
+                      <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2">➕ เพิ่มข้อสอบใหม่ด่วน</h4>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                         <div>
                             <label className="block text-xs font-bold text-gray-500 mb-1">วิชา</label>
-                            <select value={qSubject} onChange={(e)=>setQSubject(e.target.value as Subject)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-200">
-                                {Object.values(Subject).map(s=><option key={s} value={s}>{s}</option>)}
+                            <select value={qSubject} onChange={(e)=>setQSubject(e.target.value as Subject)} className="w-full p-2 border rounded-lg bg-white text-gray-900">
+                                 {Object.values(Subject).map(s=><option key={s} value={s}>{s}</option>)}
                             </select>
-                        </div>
-                        <div>
+                         </div>
+                         <div>
                             <label className="block text-xs font-bold text-gray-500 mb-1">ระดับชั้น</label>
-                            <select value={qGrade} onChange={(e)=>setQGrade(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-200">
-                                {GRADES.map(g=><option key={g} value={g}>{g}</option>)}
+                            <select value={qGrade} onChange={(e)=>setQGrade(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900">
+                                 {GRADES.map(g=><option key={g} value={g}>{g}</option>)}
                             </select>
-                        </div>
-                    </div>
-                    <div className="mb-4">
-                        <label className="block text-xs font-bold text-gray-500 mb-1">โจทย์คำถาม</label>
-                        <textarea value={qText} onChange={(e)=>setQText(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-200" rows={2} placeholder="พิมพ์โจทย์..."></textarea>
-                    </div>
-                    <div className="mb-4">
-                        <label className="block text-xs font-bold text-gray-500 mb-1">รูปภาพประกอบ (ถ้ามี Link)</label>
-                        <input type="text" value={qImage} onChange={(e)=>setQImage(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-200" placeholder="https://..." />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <input type="text" value={qChoices.c1} onChange={(e)=>setQChoices({...qChoices, c1:e.target.value})} placeholder="ก." className="p-2 border border-gray-300 rounded-lg bg-white text-gray-900"/>
-                        <input type="text" value={qChoices.c2} onChange={(e)=>setQChoices({...qChoices, c2:e.target.value})} placeholder="ข." className="p-2 border border-gray-300 rounded-lg bg-white text-gray-900"/>
-                        <input type="text" value={qChoices.c3} onChange={(e)=>setQChoices({...qChoices, c3:e.target.value})} placeholder="ค." className="p-2 border border-gray-300 rounded-lg bg-white text-gray-900"/>
-                        <input type="text" value={qChoices.c4} onChange={(e)=>setQChoices({...qChoices, c4:e.target.value})} placeholder="ง." className="p-2 border border-gray-300 rounded-lg bg-white text-gray-900"/>
-                    </div>
-                    <div className="mb-4">
-                        <label className="block text-xs font-bold text-gray-500 mb-1">เฉลยข้อถูก</label>
-                        <select value={qCorrect} onChange={(e)=>setQCorrect(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-200">
+                         </div>
+                      </div>
+                      <div className="mb-4">
+                         <label className="block text-xs font-bold text-gray-500 mb-1">โจทย์คำถาม</label>
+                         <textarea value={qText} onChange={(e)=>setQText(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900" rows={2} placeholder="พิมพ์โจทย์..."></textarea>
+                      </div>
+                      <div className="mb-4">
+                         <label className="block text-xs font-bold text-gray-500 mb-1">รูปภาพประกอบ (ถ้ามี Link)</label>
+                         <input type="text" value={qImage} onChange={(e)=>setQImage(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900" placeholder="https://..." />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                         <input type="text" value={qChoices.c1} onChange={(e)=>setQChoices({...qChoices, c1:e.target.value})} placeholder="ก." className="p-2 border rounded-lg bg-white text-gray-900"/>
+                         <input type="text" value={qChoices.c2} onChange={(e)=>setQChoices({...qChoices, c2:e.target.value})} placeholder="ข." className="p-2 border rounded-lg bg-white text-gray-900"/>
+                         <input type="text" value={qChoices.c3} onChange={(e)=>setQChoices({...qChoices, c3:e.target.value})} placeholder="ค." className="p-2 border rounded-lg bg-white text-gray-900"/>
+                         <input type="text" value={qChoices.c4} onChange={(e)=>setQChoices({...qChoices, c4:e.target.value})} placeholder="ง." className="p-2 border rounded-lg bg-white text-gray-900"/>
+                      </div>
+                      <div className="mb-4">
+                         <label className="block text-xs font-bold text-gray-500 mb-1">เฉลยข้อถูก</label>
+                         <select value={qCorrect} onChange={(e)=>setQCorrect(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900">
                             <option value="1">ก.</option><option value="2">ข.</option><option value="3">ค.</option><option value="4">ง.</option>
-                        </select>
-                    </div>
-                    <div className="mb-4">
-                        <label className="block text-xs font-bold text-gray-500 mb-1">อธิบายเฉลย</label>
-                        <textarea value={qExplain} onChange={(e)=>setQExplain(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-200" rows={1} placeholder="อธิบายเหตุผล..."></textarea>
-                    </div>
-                    <button onClick={handleAddQuestion} disabled={isSaving} className="w-full bg-blue-600 text-white py-2 rounded-xl font-bold shadow hover:bg-blue-700 flex items-center justify-center gap-2">
-                        {isSaving ? 'กำลังบันทึก...' : <><PlusCircle size={20}/> บันทึกข้อสอบ</>}
-                    </button>
-                </div>
-
-                {/* 1. ปุ่มเลือกวิชา (Filter) */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                    {[
+                         </select>
+                      </div>
+                      <div className="mb-4">
+                         <label className="block text-xs font-bold text-gray-500 mb-1">อธิบายเฉลย</label>
+                         <textarea value={qExplain} onChange={(e)=>setQExplain(e.target.value)} className="w-full p-2 border rounded-lg bg-white text-gray-900" rows={1} placeholder="อธิบายเหตุผล..."></textarea>
+                      </div>
+                      <button onClick={handleAddQuestion} disabled={isSaving} className="w-full bg-blue-600 text-white py-2 rounded-xl font-bold shadow hover:bg-blue-700 flex items-center justify-center gap-2">
+                         {isSaving ? 'กำลังบันทึก...' : <><PlusCircle size={20}/> บันทึกข้อสอบ</>}
+                      </button>
+                  </div>
+    
+                  {/* 1. ปุ่มเลือกวิชา (Filter) */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                     {[
                         { id: Subject.MATH, icon: <Calculator />, color: 'bg-red-100 text-red-700 border-red-200' },
                         { id: Subject.THAI, icon: <Book />, color: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
                         { id: Subject.SCIENCE, icon: <FlaskConical />, color: 'bg-green-100 text-green-700 border-green-200' },
                         { id: Subject.ENGLISH, icon: <Languages />, color: 'bg-blue-100 text-blue-700 border-blue-200' }
-                    ].map(sub => (
+                     ].map(sub => (
                         <button 
                             key={sub.id}
                             onClick={() => { setQBankSubject(sub.id); setQBankPage(1); }}
@@ -451,85 +468,83 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             <div className="text-3xl">{sub.icon}</div>
                             <span className="font-bold">{sub.id}</span>
                         </button>
-                    ))}
-                </div>
-
-                {/* 2. รายการข้อสอบ */}
-                {qBankSubject ? (
-                    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden animate-fade-in">
-                        <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
-                            <span className="font-bold text-gray-700">รายการข้อสอบวิชา {qBankSubject}</span>
-                            <span className="text-xs text-gray-400">ทั้งหมด {filteredQuestions.length} ข้อ</span>
-                        </div>
-                        
-                        {filteredQuestions.length === 0 ? (
-                            <div className="p-10 text-center text-gray-400">ยังไม่มีข้อสอบในหมวดนี้</div>
-                        ) : (
-                            <div className="divide-y divide-gray-100">
-                                {currentQuestions.map((q, idx) => (
-                                    <div key={q.id} className="p-5 hover:bg-blue-50 transition">
-                                        <div className="flex justify-between items-start mb-3">
-                                            <div className="flex gap-2">
-                                                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">ข้อ {((qBankPage-1)*ITEMS_PER_PAGE) + idx + 1}</span>
-                                                <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded">ชั้น {q.grade}</span>
-                                                <span className={`text-xs px-2 py-1 rounded font-bold ${q.school === 'CENTER' || q.school === 'Admin' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
-                                                    {q.school === 'CENTER' || q.school === 'Admin' ? 'ส่วนกลาง' : 'โรงเรียนเรา'}
-                                                </span>
-                                            </div>
-                                            <span className="text-xs text-gray-300 font-mono">ID: {q.id}</span>
-                                        </div>
-                                        <p className="font-bold text-gray-800 mb-3 text-lg">{q.text}</p>
-                                        {q.image && <img src={q.image} alt="question" className="h-32 object-contain rounded border mb-3" />}
-                                        
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                                            {q.choices.map((c, cIdx) => (
-                                                <div key={c.id} className={`p-2 rounded border flex items-center gap-2 ${c.id === q.correctChoiceId ? 'bg-green-50 border-green-200 text-green-800 font-bold' : 'bg-white border-gray-100 text-gray-500'}`}>
-                                                    <span className="font-bold text-gray-400 w-5 text-center">{['ก','ข','ค','ง'][cIdx]}.</span>
-                                                    {c.text} {c.id === q.correctChoiceId && '✅'}
-                                                </div>
-                                            ))}
-                                        </div>
-                                        <div className="mt-3 text-xs text-gray-400">
-                                            <span className="font-bold text-gray-500">เฉลย:</span> {q.explanation}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                        
-                        {/* 3. Pagination */}
-                        {totalPages > 1 && (
-                            <div className="p-4 border-t bg-gray-50 flex justify-center gap-4 items-center">
-                                <button 
-                                    onClick={() => setQBankPage(p => Math.max(1, p - 1))}
-                                    disabled={qBankPage === 1}
-                                    className="p-2 rounded-lg hover:bg-white disabled:opacity-30 transition"
-                                >
-                                    <ChevronLeft />
-                                </button>
-                                <span className="font-bold text-gray-600">หน้า {qBankPage} / {totalPages}</span>
-                                <button 
-                                    onClick={() => setQBankPage(p => Math.min(totalPages, p + 1))}
-                                    disabled={qBankPage === totalPages}
-                                    className="p-2 rounded-lg hover:bg-white disabled:opacity-30 transition"
-                                >
-                                    <ChevronRight />
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-2xl">
-                        <FileText size={48} className="mx-auto mb-2 opacity-20" />
-                        กรุณาเลือกวิชาเพื่อดูข้อสอบ
-                    </div>
-                )}
-            </div>
+                     ))}
+                  </div>
+    
+                  {/* 2. รายการข้อสอบ */}
+                  {qBankSubject ? (
+                      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden animate-fade-in">
+                          <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                              <span className="font-bold text-gray-700">รายการข้อสอบวิชา {qBankSubject}</span>
+                              <span className="text-xs text-gray-400">ทั้งหมด {filteredQuestions.length} ข้อ</span>
+                          </div>
+                          
+                          {filteredQuestions.length === 0 ? (
+                              <div className="p-10 text-center text-gray-400">ยังไม่มีข้อสอบในหมวดนี้</div>
+                          ) : (
+                              <div className="divide-y divide-gray-100">
+                                  {currentQuestions.map((q, idx) => (
+                                      <div key={q.id} className="p-5 hover:bg-blue-50 transition">
+                                          <div className="flex justify-between items-start mb-3">
+                                              <div className="flex gap-2">
+                                                  <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">ข้อ {((qBankPage-1)*ITEMS_PER_PAGE) + idx + 1}</span>
+                                                  <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded">ชั้น {q.grade}</span>
+                                                  <span className={`text-xs px-2 py-1 rounded font-bold ${q.school === 'CENTER' || q.school === 'Admin' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
+                                                      {q.school === 'CENTER' || q.school === 'Admin' ? 'ส่วนกลาง' : 'โรงเรียนเรา'}
+                                                  </span>
+                                              </div>
+                                              <span className="text-xs text-gray-300 font-mono">ID: {q.id}</span>
+                                          </div>
+                                          <p className="font-bold text-gray-800 mb-3 text-lg">{q.text}</p>
+                                          {q.image && <img src={q.image} alt="question" className="h-32 object-contain rounded border mb-3" />}
+                                          
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                                              {q.choices.map((c, cIdx) => (
+                                                  <div key={c.id} className={`p-2 rounded border flex items-center gap-2 ${c.id === q.correctChoiceId ? 'bg-green-50 border-green-200 text-green-800 font-bold' : 'bg-white border-gray-100 text-gray-500'}`}>
+                                                      <span className="font-bold text-gray-400 w-5 text-center">{['ก','ข','ค','ง'][cIdx]}.</span>
+                                                      {c.text} {c.id === q.correctChoiceId && '✅'}
+                                                  </div>
+                                              ))}
+                                          </div>
+                                          <div className="mt-3 text-xs text-gray-400">
+                                              <span className="font-bold text-gray-500">เฉลย:</span> {q.explanation}
+                                          </div>
+                                      </div>
+                                  ))}
+                              </div>
+                          )}
+                          
+                          {/* 3. Pagination */}
+                          {totalPages > 1 && (
+                              <div className="p-4 border-t bg-gray-50 flex justify-center gap-4 items-center">
+                                  <button 
+                                      onClick={() => setQBankPage(p => Math.max(1, p - 1))}
+                                      disabled={qBankPage === 1}
+                                      className="p-2 rounded-lg hover:bg-white disabled:opacity-30 transition"
+                                  >
+                                      <ChevronLeft />
+                                  </button>
+                                  <span className="font-bold text-gray-600">หน้า {qBankPage} / {totalPages}</span>
+                                  <button 
+                                      onClick={() => setQBankPage(p => Math.min(totalPages, p + 1))}
+                                      disabled={qBankPage === totalPages}
+                                      className="p-2 rounded-lg hover:bg-white disabled:opacity-30 transition"
+                                  >
+                                      <ChevronRight />
+                                  </button>
+                              </div>
+                          )}
+                      </div>
+                  ) : (
+                      <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-2xl">
+                          <FileText size={48} className="mx-auto mb-2 opacity-20" />
+                          กรุณาเลือกวิชาเพื่อดูข้อสอบ
+                      </div>
+                  )}
+               </div>
             )}
-
         </div>
       )}
-
       {/* MODAL: View Progress */}
       {selectedAssignment && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -573,12 +588,10 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
               </div>
           </div>
       )}
-
     </div>
   );
 };
 
-// เมนูการ์ด (Helper Component)
 const MenuCard: React.FC<{ icon: React.ReactNode; title: string; desc: string; color: string; onClick: () => void }> = ({ icon, title, desc, color, onClick }) => (
     <button onClick={onClick} className={`p-6 rounded-2xl border-2 text-left transition-all hover:-translate-y-1 shadow-sm hover:shadow-md flex flex-col items-start gap-3 ${color} bg-white`}>
         <div className="p-3 rounded-xl bg-white/80 backdrop-blur-sm shadow-sm">{icon}</div>
