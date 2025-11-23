@@ -1,4 +1,13 @@
-
+export interface Teacher {
+  id?: number; // New
+  username?: string; // New
+  password?: string; // New
+  name: string;
+  school: string;
+  role?: string; // ADMIN or TEACHER
+  gradeLevel?: string; 
+}
+// ... (อื่นๆ คงเดิม)
 export interface Student {
   id: string;
   name: string;
@@ -53,3 +62,4 @@ export interface Assignment {
 }
 
 export type GameState = 'LOBBY' | 'COUNTDOWN' | 'QUESTION' | 'LEADERBOARD' | 'FINISHED';
+
