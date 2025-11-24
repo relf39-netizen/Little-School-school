@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Student, Question } from '../types';
 import { Users, Trophy, Play, CheckCircle, Volume2, VolumeX, Crown, Zap, AlertTriangle } from 'lucide-react';
@@ -26,6 +27,10 @@ const GameMode: React.FC<GameModeProps> = ({ student, onExit }) => {
   
   const [timer, setTimer] = useState(0);
   const [maxTime, setMaxTime] = useState(20);
+  
+  // สร้าง State สำหรับเก็บคำตอบที่เลือก (เพื่อแสดงผลทันทีไม่ต้องรอ Firebase)
+  const [localSelection, setLocalSelection] = useState<string | null>(null);
+  const [localIsCorrect, setLocalIsCorrect] = useState<boolean | null>(null);
   
   const isAdmin = student.id === '99999'; 
   const timerRef = useRef<any>(null);
@@ -67,6 +72,14 @@ const GameMode: React.FC<GameModeProps> = ({ student, onExit }) => {
       const data = snapshot.val();
       if (data) {
         setStatus(data.status || 'LOBBY');
+        
+        // ถ้าข้อเปลี่ยน ให้รีเซ็ตสถานะการตอบ
+        if (data.currentQuestionIndex !== currentQuestionIndex) {
+            setHasAnswered(false);
+            setLocalSelection(null);
+            setLocalIsCorrect(null);
+        }
+
         setCurrentQuestionIndex(data.currentQuestionIndex || 0);
         setTimer(data.timer || 0);
         if (data.timePerQuestion) setMaxTime(data.timePerQuestion);
@@ -93,11 +106,9 @@ const GameMode: React.FC<GameModeProps> = ({ student, onExit }) => {
 
     const playersRef = db.ref('game/players');
     playersRef.on('value', (snap: any) => { 
-        // แก้ไข: รับค่า null (เมื่อล้างห้อง) ได้ถูกต้อง
         const val = snap.val();
         if(val) {
             const allPlayers = Object.values(val);
-            // กรองครูออกตรงนี้เลย
             setPlayers(allPlayers.filter((p:any) => p.name !== undefined && String(p.id) !== '99999'));
         } else {
             setPlayers([]);
@@ -106,7 +117,6 @@ const GameMode: React.FC<GameModeProps> = ({ student, onExit }) => {
     
     const scoresRef = db.ref('game/scores');
     scoresRef.on('value', (snap: any) => { 
-        // แก้ไข: รับค่า null ได้ถูกต้อง (รีเซ็ตคะแนน)
         setScores(snap.val() || {}); 
     });
 
@@ -126,11 +136,8 @@ const GameMode: React.FC<GameModeProps> = ({ student, onExit }) => {
       scoresRef.off();
       questionsRef.off();
     };
-  }, [student.id, isAdmin]);
+  }, [student.id, isAdmin, currentQuestionIndex]);
 
-  useEffect(() => {
-    setHasAnswered(false);
-  }, [currentQuestionIndex]);
 
   // Admin Game Loop
   useEffect(() => {
@@ -190,21 +197,38 @@ const GameMode: React.FC<GameModeProps> = ({ student, onExit }) => {
   const handleAnswer = (choiceId: string) => {
     if (hasAnswered || timer <= 0) return;
     setHasAnswered(true);
+    setLocalSelection(choiceId);
 
     const currentQ = questions[currentQuestionIndex];
-    const isCorrect = choiceId === currentQ.correctChoiceId;
+    // ✅ ใช้ String comparison เพื่อความชัวร์ (แก้ปัญหา 1 != "1")
+    const isCorrect = String(choiceId) === String(currentQ.correctChoiceId);
+    setLocalIsCorrect(isCorrect);
     
-    const timeBonus = Math.round(50 * (timer / maxTime));
-    const points = isCorrect ? (50 + timeBonus) : 0;
-    
-    if (points > 0) {
-       // Transaction เพื่อความแม่นยำและแก้ปัญหาคะแนนเป็น 0
+    if (isCorrect) {
+       // คำนวณคะแนน
+       const timeBonus = Math.max(0, Math.round(50 * (timer / maxTime)));
+       const points = 50 + timeBonus;
+
+       playSFX('CORRECT'); 
+       speak("เยี่ยมมาก");
+       
+       // บันทึกคะแนน (ใช้ Transaction เพื่อความแม่นยำ)
        db.ref(`game/scores/${student.id}`).transaction((currentScore) => {
          return (currentScore || 0) + points;
+       }, (error, committed, snapshot) => {
+           if (error) {
+               console.error('Transaction failed abnormally!', error);
+               // Fallback: ถ้า Transaction พัง ให้ลอง Direct Update
+               db.ref(`game/scores/${student.id}`).once('value').then(snap => {
+                   const cur = snap.val() || 0;
+                   db.ref(`game/scores/${student.id}`).set(cur + points);
+               });
+           }
        });
-       playSFX('CORRECT'); speak("เยี่ยมมาก");
+
     } else {
-       playSFX('WRONG'); speak("ยังไม่ถูก");
+       playSFX('WRONG'); 
+       speak("ยังไม่ถูก");
     }
   };
 
@@ -346,12 +370,30 @@ const GameMode: React.FC<GameModeProps> = ({ student, onExit }) => {
                     {currentQuestion?.image && <img src={currentQuestion.image} className="h-48 mx-auto object-contain mb-6 rounded-xl border-2 border-gray-100 shadow-sm"/>}
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {currentQuestion?.choices.map((c, i) => (
-                            <button key={c.id} onClick={()=>handleAnswer(c.id)} disabled={hasAnswered || timer<=0} className={`p-5 rounded-2xl font-bold text-lg border-b-8 relative overflow-hidden transition active:scale-95 active:border-b-0 active:translate-y-2 ${['bg-red-50 border-red-200 text-red-800 hover:bg-red-100','bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100','bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100','bg-green-50 border-green-200 text-green-800 hover:bg-green-100'][i%4]} ${(hasAnswered||timer<=0)?'opacity-60 grayscale cursor-not-allowed':''}`}>
-                                {(hasAnswered || timer<=0) && c.id === currentQuestion.correctChoiceId && <div className="absolute inset-0 bg-green-500/90 flex items-center justify-center z-10"><CheckCircle className="text-white w-10 h-10 drop-shadow-md"/></div>}
-                                {c.text}
-                            </button>
-                        ))}
+                        {currentQuestion?.choices.map((c, i) => {
+                            // Logic สำหรับแสดงสีปุ่มเมื่อเฉลย
+                            let btnClass = ['bg-red-50 border-red-200 text-red-800 hover:bg-red-100','bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100','bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100','bg-green-50 border-green-200 text-green-800 hover:bg-green-100'][i%4];
+                            
+                            // ถ้าตอบไปแล้ว ให้แสดงเฉลย
+                            if (hasAnswered || timer <= 0) {
+                                btnClass += ' opacity-60 grayscale cursor-not-allowed';
+                                // ถ้าข้อนี้ถูก ให้เป็นสีเขียว
+                                if (String(c.id) === String(currentQuestion.correctChoiceId)) {
+                                    btnClass = 'bg-green-100 border-green-500 text-green-900 !opacity-100 !grayscale-0 ring-4 ring-green-200';
+                                }
+                                // ถ้าเราเลือกข้อนี้ แล้วมันผิด ให้เป็นสีแดง
+                                if (String(c.id) === String(localSelection) && String(c.id) !== String(currentQuestion.correctChoiceId)) {
+                                    btnClass = 'bg-red-100 border-red-500 text-red-900 !opacity-100 !grayscale-0 ring-4 ring-red-200';
+                                }
+                            }
+
+                            return (
+                                <button key={c.id} onClick={()=>handleAnswer(c.id)} disabled={hasAnswered || timer<=0} className={`p-5 rounded-2xl font-bold text-lg border-b-8 relative overflow-hidden transition active:scale-95 active:border-b-0 active:translate-y-2 ${btnClass}`}>
+                                    {(hasAnswered || timer<=0) && String(c.id) === String(currentQuestion.correctChoiceId) && <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center z-10"><CheckCircle className="text-green-600 w-10 h-10 drop-shadow-md bg-white rounded-full"/></div>}
+                                    {c.text}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
             </div>
