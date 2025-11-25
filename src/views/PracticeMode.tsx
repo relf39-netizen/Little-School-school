@@ -69,7 +69,8 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
       setSelectedChoice(null);
       setIsSubmitted(false);
     } else {
-      onFinish(score + (selectedChoice === currentQuestion.correctChoiceId ? 1 : 0), questions.length);
+      // ✅ แก้ไข: ส่ง score ล่าสุดไปเลย ไม่ต้องบวกเพิ่มอีก (เพราะบวกไปแล้วตอน handleSubmit)
+      onFinish(score, questions.length);
     }
   };
 

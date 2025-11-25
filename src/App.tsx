@@ -95,11 +95,13 @@ const App: React.FC = () => {
     setCurrentPage('results');
     
     if (currentUser) {
-       // ถ้ามาจากเกม ให้เติม [GAME] นำหน้าวิชา เพื่อแยกใน Google Sheet
-       let subjectToSave = currentAssignment ? currentAssignment.subject : (selectedSubject || 'รวมวิชา');
+       // ✅ ถ้าเป็นเกม: ไม่บันทึกลง Sheet และไม่รวมใน Stats (แต่เพิ่มดาวให้เพื่อความสนุก)
        if (isGame) {
-           subjectToSave = `[GAME] ${subjectToSave}`;
+           setCurrentUser(prev => prev ? { ...prev, stars: prev.stars + score } : null);
+           return; 
        }
+
+       const subjectToSave = currentAssignment ? currentAssignment.subject : (selectedSubject || 'รวมวิชา');
        
        // บันทึกคะแนนลง Google Sheet
        await saveScore(
@@ -112,13 +114,13 @@ const App: React.FC = () => {
          currentAssignment ? currentAssignment.id : undefined
        );
        
-       // อัปเดตดาว (เฉพาะถ้าไม่ใช่เกม หรือถ้าต้องการให้เกมได้ดาวด้วยก็ปล่อยไว้)
+       // อัปเดตดาว
        setCurrentUser(prev => prev ? { ...prev, stars: prev.stars + score } : null);
        
        const newResult: ExamResult = { 
          id: Math.random().toString(), 
          studentId: currentUser.id, 
-         subject: subjectToSave as Subject, // บันทึกด้วยชื่อที่มี [GAME] เพื่อแยกใน Dashboard
+         subject: subjectToSave as Subject,
          score: score, 
          totalQuestions: total, 
          timestamp: Date.now(), 
