@@ -3,15 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     
+    <!-- 🟢 PWA Manifest (สำหรับ Android) -->
+    <link rel="manifest" href="/manifest.json" />
+
     <!-- 🟢 1. Favicon -->
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/2232/2232688.png" />
     
     <!-- 🟢 2. iOS Home Screen Icon -->
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2232/2232688.png" />
     
-    <!-- 🟢 3. Android Home Screen Icon -->
-    <link rel="icon" sizes="192x192" href="https://cdn-icons-png.flaticon.com/512/2232/2232688.png" />
-    <link rel="icon" sizes="512x512" href="https://cdn-icons-png.flaticon.com/512/2232/2232688.png" />
+    <!-- 🟢 3. Android Home Screen Icon Support -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="LittleSchool">
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#4f46e5" />

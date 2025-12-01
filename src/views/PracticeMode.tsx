@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { Question, Subject } from '../types';
-import { CheckCircle, XCircle, ArrowRight, RefreshCw, ArrowLeft } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowRight, RefreshCw, ArrowLeft, Volume2 } from 'lucide-react';
 import { speak } from '../utils/soundUtils';
 
 interface PracticeModeProps {
@@ -42,11 +41,28 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
     }
   }, [allQuestions]);
 
+  // ✅ Auto-read question for P1 students when question changes
+  useEffect(() => {
+      if (questions.length > 0 && !loading) {
+          const currentQ = questions[currentIndex];
+          // Delay slightly to ensure smooth transition
+          const timer = setTimeout(() => {
+              speak(currentQ.text);
+          }, 500);
+          return () => clearTimeout(timer);
+      }
+  }, [currentIndex, questions, loading]);
+
   const currentQuestion = questions[currentIndex];
 
   const handleChoiceSelect = (choiceId: string) => {
     if (isSubmitted) return;
     setSelectedChoice(choiceId);
+  };
+
+  const handleSpeak = (e: React.MouseEvent, text: string) => {
+      e.stopPropagation(); // ป้องกันไม่ให้กดเลือกช้อยส์ตอนกดฟังเสียง
+      speak(text);
   };
 
   const handleSubmit = () => {
@@ -69,7 +85,6 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
       setSelectedChoice(null);
       setIsSubmitted(false);
     } else {
-      // ✅ แก้ไข: ส่ง score ล่าสุดไปเลย ไม่ต้องบวกเพิ่มอีก (เพราะบวกไปแล้วตอน handleSubmit)
       onFinish(score, questions.length);
     }
   };
@@ -131,11 +146,21 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
 
       {/* Question Card */}
       <div className="bg-white rounded-3xl shadow-lg p-6 md:p-8 mb-6 border-b-4 border-gray-200">
-        <div className="inline-block bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded mb-3">
-          {currentQuestion.subject}
+        <div className="flex justify-between items-start mb-3">
+            <div className="inline-block bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">
+            {currentQuestion.subject}
+            </div>
+            {/* 🔊 ปุ่มฟังเสียงโจทย์ */}
+            <button 
+                onClick={(e) => handleSpeak(e, currentQuestion.text)}
+                className="bg-blue-100 text-blue-600 p-2 rounded-full hover:bg-blue-200 transition shadow-sm"
+                title="ฟังโจทย์"
+            >
+                <Volume2 size={24} />
+            </button>
         </div>
         
-        <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-4 leading-relaxed">
+        <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-4 leading-relaxed pr-2">
           {currentQuestion.text}
         </h2>
 
@@ -194,6 +219,16 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
                   )}
                 </div>
 
+                {/* 🔊 ปุ่มฟังเสียงช้อยส์ */}
+                {!isSubmitted && (
+                    <div 
+                        onClick={(e) => handleSpeak(e, choice.text)}
+                        className="p-2 rounded-full hover:bg-black/5 text-gray-400 hover:text-blue-600 transition"
+                    >
+                        <Volume2 size={20} />
+                    </div>
+                )}
+
                 {isSubmitted && choice.id === currentQuestion.correctChoiceId && (
                   <CheckCircle className="text-green-600 absolute right-4 drop-shadow-sm" size={28} />
                 )}
@@ -224,9 +259,19 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
           ) : (
             <div className="space-y-4">
               <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-5 animate-fade-in shadow-sm">
-                <h3 className="font-bold text-green-800 mb-2 flex items-center gap-2 text-lg">
-                  <CheckCircle size={24} /> เฉลย
-                </h3>
+                <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-bold text-green-800 flex items-center gap-2 text-lg">
+                    <CheckCircle size={24} /> เฉลย
+                    </h3>
+                    {/* 🔊 ปุ่มฟังเสียงเฉลย */}
+                    <button 
+                        onClick={(e) => handleSpeak(e, currentQuestion.explanation)}
+                        className="bg-green-200 text-green-800 p-2 rounded-full hover:bg-green-300 transition shadow-sm"
+                        title="ฟังเฉลย"
+                    >
+                        <Volume2 size={20} />
+                    </button>
+                </div>
                 <p className="text-green-800 text-base leading-relaxed">{currentQuestion.explanation}</p>
               </div>
               <button

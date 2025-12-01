@@ -61,7 +61,7 @@ const Stats: React.FC<StatsProps> = ({ examResults, studentId, subjects = [], on
             name: subject,
             attempts: totalAttempts,
             score: avgScore,
-            color: getSubjectColor(subject)
+            color: getSubjectColor(subject as string)
         };
     });
 
@@ -152,7 +152,7 @@ const Stats: React.FC<StatsProps> = ({ examResults, studentId, subjects = [], on
       <h3 className="text-lg font-bold text-gray-700 mt-4">สถิติการเข้าสอบ</h3>
       <div className="grid grid-cols-2 gap-3">
         {statsData.chartData.map((sub) => (
-            <div key={sub.name} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex justify-between items-center">
+            <div key={String(sub.name)} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex justify-between items-center">
                 <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: sub.color }}></div>
                     <div>
