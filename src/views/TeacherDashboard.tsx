@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Teacher, Student, Subject, Assignment, Question, SubjectConfig } from '../types';
 import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, Users, GraduationCap, Trash2, Edit, Shield, UserCog, KeyRound, Sparkles, Wand2, Key, HelpCircle, ChevronDown, ChevronUp, Layers, Clock, Library, Palette, Type, AlertCircle, ArrowRight, BrainCircuit, List, CheckSquare, Trophy, Lock } from 'lucide-react';
@@ -32,6 +31,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const [newTeacherUser, setNewTeacherUser] = useState('');
   const [newTeacherPass, setNewTeacherPass] = useState('');
   const [newTeacherSchool, setNewTeacherSchool] = useState('');
+  const [newTeacherGrade, setNewTeacherGrade] = useState('ALL'); // ✅ Added Grade Level State
+  const [editingTeacherId, setEditingTeacherId] = useState<string | null>(null); // ✅ Added Editing ID State
   
   // Permissions Logic
   const canManageAll = !teacher.gradeLevel || teacher.gradeLevel === 'ALL';
@@ -214,28 +215,45 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   };
   
   // Teacher Management
-  const handleAddTeacher = async () => {
+  const handleSaveTeacher = async () => {
       if (!newTeacherName || !newTeacherUser || !newTeacherPass) return alert('กรุณากรอกข้อมูลให้ครบ');
       setIsProcessing(true);
       
       const res = await manageTeacher({
-          action: 'add',
+          action: editingTeacherId ? 'edit' : 'add',
+          id: editingTeacherId || undefined,
           name: newTeacherName,
           username: newTeacherUser,
           password: newTeacherPass,
           school: newTeacherSchool || teacher.school,
           role: 'TEACHER',
-          gradeLevel: 'ALL' 
+          gradeLevel: newTeacherGrade // ✅ Send Selected Grade
       });
       
       setIsProcessing(false);
       if (res.success) {
-          alert('✅ เพิ่มครูเรียบร้อย');
-          setNewTeacherName(''); setNewTeacherUser(''); setNewTeacherPass('');
+          alert(editingTeacherId ? '✅ แก้ไขข้อมูลครูเรียบร้อย' : '✅ เพิ่มบัญชีครูเรียบร้อย');
+          // Reset Form
+          setNewTeacherName(''); 
+          setNewTeacherUser(''); 
+          setNewTeacherPass(''); 
+          setNewTeacherSchool('');
+          setNewTeacherGrade('ALL');
+          setEditingTeacherId(null);
           loadData();
       } else {
           alert('เกิดข้อผิดพลาด: ' + (res.message || 'Unknown error'));
       }
+  };
+
+  const handleEditTeacher = (t: Teacher) => {
+      setEditingTeacherId(String(t.id));
+      setNewTeacherName(t.name);
+      setNewTeacherUser(t.username || '');
+      setNewTeacherPass(t.password || '');
+      setNewTeacherSchool(t.school);
+      setNewTeacherGrade(t.gradeLevel || 'ALL'); // ✅ Load Grade
+      document.getElementById('teacher-form')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const handleDeleteTeacher = async (id: string) => {
@@ -904,11 +922,13 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
             {/* TEACHER MANAGEMENT TAB (Admin Only) */}
             {activeTab === 'teachers' && isAdmin && (
-                <div className="max-w-4xl mx-auto">
+                <div className="max-w-4xl mx-auto" id="teacher-form">
                     <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><UserCog className="text-gray-600"/> จัดการข้อมูลครู</h3>
                     
-                    <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 mb-8 shadow-sm">
-                        <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><PlusCircle size={18}/> เพิ่มบัญชีครู</h4>
+                    <div className={`p-6 rounded-2xl border mb-8 shadow-sm transition-colors ${editingTeacherId ? 'bg-orange-50 border-orange-100' : 'bg-gray-50 border-gray-200'}`}>
+                        <h4 className={`font-bold mb-4 flex items-center gap-2 ${editingTeacherId ? 'text-orange-800' : 'text-gray-700'}`}>
+                            {editingTeacherId ? <><Edit size={18}/> แก้ไขข้อมูลครู</> : <><PlusCircle size={18}/> เพิ่มบัญชีครู</>}
+                        </h4>
                         <div className="grid md:grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อ-นามสกุล</label>
@@ -926,10 +946,24 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                 <label className="text-xs font-bold text-gray-500 block mb-1">Password</label>
                                 <input type="text" value={newTeacherPass} onChange={e => setNewTeacherPass(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder="เช่น 1234" />
                             </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 block mb-1">ระดับชั้นที่ดูแล</label>
+                                <select value={newTeacherGrade} onChange={(e) => setNewTeacherGrade(e.target.value)} className="w-full p-2 border rounded-lg bg-white outline-none">
+                                    <option value="ALL">ทุกระดับชั้น (Admin/Director)</option>
+                                    {GRADES.map(g => (
+                                        <option key={g} value={g}>{GRADE_LABELS[g]}</option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
-                        <button onClick={handleAddTeacher} disabled={isProcessing} className="w-full bg-gray-800 text-white py-2 rounded-lg font-bold hover:bg-black transition">
-                            {isProcessing ? 'กำลังบันทึก...' : '+ เพิ่มบัญชีครู'}
-                        </button>
+                        <div className="flex gap-2">
+                            {editingTeacherId && (
+                                <button onClick={() => { setEditingTeacherId(null); setNewTeacherName(''); setNewTeacherUser(''); setNewTeacherPass(''); setNewTeacherSchool(''); setNewTeacherGrade('ALL'); }} className="px-6 py-2 bg-gray-200 rounded-lg font-bold text-gray-600 hover:bg-gray-300">ยกเลิก</button>
+                            )}
+                            <button onClick={handleSaveTeacher} disabled={isProcessing} className={`flex-1 text-white py-2 rounded-lg font-bold shadow transition ${editingTeacherId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-gray-800 hover:bg-black'}`}>
+                                {isProcessing ? 'กำลังบันทึก...' : (editingTeacherId ? 'บันทึกการแก้ไข' : '+ เพิ่มบัญชีครู')}
+                            </button>
+                        </div>
                     </div>
 
                     <div className="bg-white rounded-xl border overflow-hidden">
@@ -937,7 +971,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                         {allTeachers.length === 0 ? <div className="p-6 text-center text-gray-400">ไม่พบข้อมูล</div> : (
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-gray-50 text-gray-500">
-                                    <tr><th className="p-3">ชื่อ</th><th className="p-3">Username</th><th className="p-3">โรงเรียน</th><th className="p-3 text-right">จัดการ</th></tr>
+                                    <tr><th className="p-3">ชื่อ</th><th className="p-3">Username</th><th className="p-3">โรงเรียน</th><th className="p-3">ชั้น</th><th className="p-3 text-right">จัดการ</th></tr>
                                 </thead>
                                 <tbody>
                                     {allTeachers.map(t => (
@@ -945,9 +979,17 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                             <td className="p-3 font-bold">{t.name} {t.role === 'ADMIN' && <span className="bg-yellow-100 text-yellow-800 text-[10px] px-1 rounded ml-1">ADMIN</span>}</td>
                                             <td className="p-3 font-mono text-gray-500">{t.username}</td>
                                             <td className="p-3 text-gray-600">{t.school}</td>
+                                            <td className="p-3 text-gray-600">
+                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${!t.gradeLevel || t.gradeLevel === 'ALL' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                    {(!t.gradeLevel || t.gradeLevel === 'ALL') ? 'ทุกชั้น' : GRADE_LABELS[t.gradeLevel] || t.gradeLevel}
+                                                </span>
+                                            </td>
                                             <td className="p-3 text-right">
                                                 {String(t.id) !== String(teacher.id) && t.role !== 'ADMIN' && (
-                                                    <button onClick={() => handleDeleteTeacher(String(t.id))} className="text-red-500 hover:bg-red-100 p-1.5 rounded"><Trash2 size={16}/></button>
+                                                    <div className="flex justify-end gap-2">
+                                                        <button onClick={() => handleEditTeacher(t)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit size={16}/></button>
+                                                        <button onClick={() => handleDeleteTeacher(String(t.id))} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                                                    </div>
                                                 )}
                                             </td>
                                         </tr>
@@ -1401,7 +1443,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                              {editingStudentId && (
                                  <button onClick={handleCancelEdit} className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-300 transition">ยกเลิก</button>
                              )}
-                             <button onClick={handleSaveStudent} disabled={isSaving || !newStudentName} className={`flex-1 text-white py-3 rounded-xl font-bold shadow disabled:opacity-50 transition flex items-center justify-center gap-2 ${editingStudentId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-purple-600 hover:bg-purple-700'}`}>
+                             <button onClick={handleSaveStudent} disabled={isSaving || !newStudentName} className={`flex-1 text-white py-3 rounded-xl font-bold shadow transition flex items-center justify-center gap-2 ${editingStudentId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-purple-600 hover:bg-purple-700'}`}>
                                  {isSaving ? <RefreshCw className="animate-spin" /> : <Save size={20} />}
                                  {isSaving ? 'กำลังบันทึก...' : (editingStudentId ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล')}
                              </button>
