@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles } from 'lucide-react';
+import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles, RefreshCw } from 'lucide-react';
 import { Student, Assignment, ExamResult, SubjectConfig } from '../types';
 
 interface DashboardProps {
@@ -11,7 +10,22 @@ interface DashboardProps {
   onNavigate: (page: string) => void;
   onStartAssignment?: (assignment: Assignment) => void;
   onSelectSubject?: (subjectName: string) => void;
+  onRefreshSubjects?: () => void;
 }
+
+const ENCOURAGING_MESSAGES = [
+  "สู้ๆ นะคนเก่ง ✌️",
+  "วิชานี้สนุกนะ 🌟",
+  "ทำได้แน่นอน 💯",
+  "มาเก็บดาวกันเถอะ ⭐",
+  "ฝึกฝนบ่อยๆ เก่งขึ้นแน่ 📚",
+  "เชื่อมั่นในตัวเองนะ 💪",
+  "เก่งมากครับคนดี 👍",
+  "ลุยเลย! 🚀",
+  "ความพยายามอยู่ที่ไหน ความสำเร็จอยู่ที่นั่น ❤️",
+  "วันนี้เรียนอะไรดีนะ 🤔",
+  "สนุกกับการเรียนรู้นะ 🌈"
+];
 
 const Dashboard: React.FC<DashboardProps> = ({ 
   student, 
@@ -20,7 +34,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   subjects = [], 
   onNavigate, 
   onStartAssignment,
-  onSelectSubject 
+  onSelectSubject,
+  onRefreshSubjects
 }) => {
   const [view, setView] = useState<'main' | 'history'>('main');
 
@@ -46,8 +61,13 @@ const Dashboard: React.FC<DashboardProps> = ({
       return (resultB?.timestamp || 0) - (resultA?.timestamp || 0);
   });
 
-  // ✅ กรองรายวิชาเฉพาะของชั้นตัวเอง
-  const mySubjects = subjects.filter(s => s.grade === 'ALL' || s.grade === student.grade);
+  // ✅ กรองรายวิชา: พยายามกรองตามชั้นเรียนก่อน
+  let mySubjects = subjects.filter(s => s.grade === 'ALL' || s.grade === student.grade);
+
+  // ✅ Fallback: ถ้ากรองแล้วไม่เจอ แต่ในโรงเรียนมีวิชา ให้แสดงทั้งหมด (เพื่อป้องกันหน้าจอโล่งกรณีตั้งค่าเกรดผิด)
+  if (mySubjects.length === 0 && subjects.length > 0) {
+      mySubjects = subjects;
+  }
 
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
@@ -66,6 +86,14 @@ const Dashboard: React.FC<DashboardProps> = ({
           case 'Computer': return <Gamepad2 size={size} />;
           default: return <Sparkles size={size} />;
       }
+  };
+
+  const getEncouragement = (subjectName: string, index: number) => {
+      let hash = 0;
+      for (let i = 0; i < subjectName.length; i++) {
+          hash = subjectName.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return ENCOURAGING_MESSAGES[(Math.abs(hash) + index) % ENCOURAGING_MESSAGES.length];
   };
 
   // --- ส่วนแสดงผลหน้าประวัติการส่งงาน ---
@@ -193,32 +221,42 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* 3. วิชาเรียนของคุณ (Your Subjects) */}
       <div>
-        <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <BookOpen className="text-indigo-600" /> วิชาเรียนของคุณ
-        </h3>
+        <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <BookOpen className="text-indigo-600" /> วิชาเรียนของคุณ
+            </h3>
+            {onRefreshSubjects && (
+                <button onClick={onRefreshSubjects} className="text-gray-500 hover:text-indigo-600 bg-white p-2 rounded-full shadow-sm border hover:border-indigo-200 transition">
+                    <RefreshCw size={16} />
+                </button>
+            )}
+        </div>
         
         {mySubjects.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400">
                 <div className="bg-gray-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-3">
                     <BookOpen size={40} className="text-gray-300"/>
                 </div>
-                <p>ยังไม่มีรายวิชาสำหรับระดับชั้น {GRADE_LABELS[student.grade || 'P6'] || student.grade}</p>
-                <p className="text-sm mt-1">รอคุณครูเพิ่มรายวิชาเข้าสู่ระบบ</p>
+                <p>ยังไม่มีรายวิชาสำหรับโรงเรียน: <span className="font-bold text-gray-500">{student.school || 'ไม่ระบุ'}</span></p>
+                <p className="text-sm mt-1">ระดับชั้น: {GRADE_LABELS[student.grade || ''] || student.grade || 'ไม่ระบุ'}</p>
+                <button onClick={onRefreshSubjects} className="mt-4 text-indigo-600 underline text-sm">ลองรีเฟรชข้อมูล</button>
             </div>
         ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {mySubjects.map((sub) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 animate-fade-in">
+                {mySubjects.map((sub, index) => (
                     <button 
                         key={sub.id}
                         onClick={() => onSelectSubject && onSelectSubject(sub.name)}
-                        className={`group relative p-6 rounded-3xl border-2 text-left transition-all hover:-translate-y-1 hover:shadow-lg flex flex-col items-start gap-4 ${sub.color || 'bg-white border-gray-100'}`}
+                        className={`group relative p-6 rounded-3xl border-2 text-left transition-all hover:-translate-y-1 hover:shadow-xl flex flex-col items-start gap-4 ${sub.color || 'bg-white border-gray-100'}`}
                     >
                         <div className="bg-white/80 p-3 rounded-2xl shadow-sm backdrop-blur-sm">
                             {getIcon(sub.icon, 32)}
                         </div>
-                        <div>
+                        <div className="w-full">
                             <h4 className="font-bold text-lg text-gray-800 group-hover:text-blue-700 transition-colors">{sub.name}</h4>
-                            <p className="text-xs opacity-70 font-medium mt-1">คลิกเพื่อฝึกฝน</p>
+                            <p className="text-sm font-medium mt-2 text-gray-600 bg-white/60 p-2 rounded-lg italic">
+                                "{getEncouragement(sub.name, index)}"
+                            </p>
                         </div>
                         <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
                             <div className="bg-white/90 px-3 py-1 rounded-full text-xs font-bold shadow-sm text-blue-600">
@@ -231,7 +269,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         )}
       </div>
 
-      {/* 4. เมนูอื่นๆ (Menu) - ปรับปรุงให้สอดคล้องกัน */}
+      {/* 4. เมนูอื่นๆ (Menu) */}
       <div>
         <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <Sparkles className="text-yellow-500" /> เมนูเพิ่มเติม

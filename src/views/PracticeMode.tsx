@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { Question, Subject } from '../types';
-import { CheckCircle, XCircle, ArrowRight, RefreshCw, ArrowLeft, Volume2 } from 'lucide-react';
-import { speak } from '../utils/soundUtils';
+import { CheckCircle, XCircle, ArrowRight, RefreshCw, ArrowLeft, Volume2, VolumeX } from 'lucide-react';
+import { speak, stopSpeak } from '../utils/soundUtils';
 
 interface PracticeModeProps {
   onFinish: (score: number, total: number) => void;
@@ -16,6 +17,10 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [score, setScore] = useState(0);
   const [loading, setLoading] = useState(true);
+  
+  // ✅ สถานะเปิด/ปิดเสียงอ่าน (ค่าเริ่มต้น: ปิด = false)
+  // เริ่มต้นเป็น false ตามที่ต้องการ (ต้องกดปุ่มลำโพงก่อนถึงจะมีเสียง)
+  const [isTTSEnabled, setIsTTSEnabled] = useState(false);
 
   const choiceLabels = ['A', 'B', 'C', 'D']; // ป้ายกำกับตัวเลือก
 
@@ -41,28 +46,41 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
     }
   }, [allQuestions]);
 
-  // ✅ Auto-read question for P1 students when question changes
-  useEffect(() => {
-      if (questions.length > 0 && !loading) {
-          const currentQ = questions[currentIndex];
-          // Delay slightly to ensure smooth transition
-          const timer = setTimeout(() => {
-              speak(currentQ.text);
-          }, 500);
-          return () => clearTimeout(timer);
-      }
-  }, [currentIndex, questions, loading]);
-
   const currentQuestion = questions[currentIndex];
+
+  // ✅ ฟังก์ชันอ่านเสียง (โจทย์ -> ตัวเลือก หรือ เฉลย)
+  const playAudio = () => {
+    if (!currentQuestion) return;
+    
+    stopSpeak(); // หยุดเสียงเก่าก่อน
+    
+    if (isSubmitted) {
+        // อ่านเฉลย
+        speak("เฉลย.. " + currentQuestion.explanation);
+    } else {
+        // อ่านโจทย์และตัวเลือก
+        let textToRead = "คำถาม.. " + currentQuestion.text;
+        currentQuestion.choices.forEach((c, i) => {
+            textToRead += `. ข้อ ${choiceLabels[i]}.. ${c.text}`;
+        });
+        speak(textToRead);
+    }
+  };
+
+  // ✅ Effect: อ่านอัตโนมัติเมื่อเปิดเสียง และ เปลี่ยนข้อ/กดส่ง
+  useEffect(() => {
+    if (isTTSEnabled) {
+        playAudio();
+    } else {
+        stopSpeak();
+    }
+    // Cleanup
+    return () => stopSpeak();
+  }, [currentIndex, isSubmitted, isTTSEnabled]);
 
   const handleChoiceSelect = (choiceId: string) => {
     if (isSubmitted) return;
     setSelectedChoice(choiceId);
-  };
-
-  const handleSpeak = (e: React.MouseEvent, text: string) => {
-      e.stopPropagation(); // ป้องกันไม่ให้กดเลือกช้อยส์ตอนกดฟังเสียง
-      speak(text);
   };
 
   const handleSubmit = () => {
@@ -71,11 +89,12 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
     const isCorrect = selectedChoice === currentQuestion.correctChoiceId;
     setIsSubmitted(true);
     
+    // เสียง Feedback (แยกจาก TTS หลัก) -> ใช้ speak แทรกได้เลย
     if (isCorrect) {
       setScore(prev => prev + 1);
-      speak("ถูกต้องครับ เก่งมาก");
+      if(!isTTSEnabled) speak("ถูกต้องครับ เก่งมาก");
     } else {
-      speak("ยังไม่ถูก ไม่เป็นไรครับ ดูเฉลยกัน");
+      if(!isTTSEnabled) speak("ยังไม่ถูก ไม่เป็นไรครับ ดูเฉลยกัน");
     }
   };
 
@@ -85,6 +104,7 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
       setSelectedChoice(null);
       setIsSubmitted(false);
     } else {
+      // ✅ แก้ไข: ส่ง score ล่าสุดไปเลย ไม่ต้องบวกเพิ่มอีก (เพราะบวกไปแล้วตอน handleSubmit)
       onFinish(score, questions.length);
     }
   };
@@ -150,19 +170,31 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
             <div className="inline-block bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">
             {currentQuestion.subject}
             </div>
-            {/* 🔊 ปุ่มฟังเสียงโจทย์ */}
+            
+            {/* 🟢 ปุ่มเปิด/ปิดเสียงอ่านอัตโนมัติ (Toggle TTS) */}
+            {/* ค่าเริ่มต้น: ปิด (VolumeX) -> กดแล้วเปิด (Volume2) */}
             <button 
-                onClick={(e) => handleSpeak(e, currentQuestion.text)}
-                className="bg-blue-100 text-blue-600 p-2 rounded-full hover:bg-blue-200 transition shadow-sm"
-                title="ฟังโจทย์"
+               onClick={() => setIsTTSEnabled(!isTTSEnabled)} 
+               className={`p-2 rounded-full transition-all border-2 ${isTTSEnabled ? 'bg-blue-100 text-blue-600 border-blue-200 shadow-inner' : 'bg-gray-100 text-gray-400 border-transparent hover:bg-gray-200'}`}
+               title={isTTSEnabled ? "ปิดเสียงอ่านอัตโนมัติ" : "เปิดเสียงอ่านอัตโนมัติ"}
+            >
+               {isTTSEnabled ? <Volume2 size={24} className="animate-pulse" /> : <VolumeX size={24} />}
+            </button>
+        </div>
+        
+        <div className="flex items-start gap-2 mb-4">
+            <h2 className="text-xl md:text-2xl font-bold text-gray-800 leading-relaxed flex-1">
+                {currentQuestion.text}
+            </h2>
+            {/* ปุ่มอ่านเฉพาะโจทย์ (กดฟังเองได้เสมอ) */}
+            <button 
+                onClick={() => speak(currentQuestion.text)} 
+                className="p-2 text-gray-400 hover:text-blue-500 bg-gray-50 hover:bg-blue-50 rounded-full transition-colors flex-shrink-0"
+                title="อ่านโจทย์"
             >
                 <Volume2 size={24} />
             </button>
         </div>
-        
-        <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-4 leading-relaxed pr-2">
-          {currentQuestion.text}
-        </h2>
 
         {currentQuestion.image && (
           <div className="mb-6 rounded-xl overflow-hidden border-2 border-gray-100">
@@ -197,45 +229,47 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
             }
 
             return (
-              <button
+              <div
                 key={choice.id}
-                onClick={() => handleChoiceSelect(choice.id)}
-                disabled={isSubmitted}
-                className={`w-full p-3 md:p-4 rounded-2xl text-left text-lg ${buttonStyle}`}
+                role="button"
+                onClick={() => !isSubmitted && handleChoiceSelect(choice.id)}
+                className={`w-full p-3 md:p-4 rounded-2xl text-left text-lg ${buttonStyle} ${!isSubmitted ? 'cursor-pointer' : ''}`}
               >
                 {/* Label Circle A, B, C, D */}
                 <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg transition-colors ${badgeStyle}`}>
                    {label}
                 </div>
 
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   {choice.image ? (
                      <div className="flex items-center gap-3 w-full">
                         <img src={choice.image} alt="choice" className="w-16 h-16 rounded object-cover border bg-white" />
-                        <span className="font-medium">{choice.text}</span>
+                        <span className="font-medium truncate">{choice.text}</span>
                      </div>
                   ) : (
-                     <span className="font-medium">{choice.text}</span>
+                     <span className="font-medium break-words">{choice.text}</span>
                   )}
                 </div>
 
-                {/* 🔊 ปุ่มฟังเสียงช้อยส์ */}
-                {!isSubmitted && (
-                    <div 
-                        onClick={(e) => handleSpeak(e, choice.text)}
-                        className="p-2 rounded-full hover:bg-black/5 text-gray-400 hover:text-blue-600 transition"
-                    >
-                        <Volume2 size={20} />
-                    </div>
-                )}
+                {/* 🔊 ปุ่มลำโพงสำหรับตัวเลือก (กดฟังเอง) */}
+                <button 
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        speak(choice.text);
+                    }}
+                    className="p-2 rounded-full text-gray-400 hover:text-blue-600 hover:bg-white/50 transition-colors z-10 ml-2"
+                    title="อ่านตัวเลือก"
+                >
+                    <Volume2 size={20} />
+                </button>
 
                 {isSubmitted && choice.id === currentQuestion.correctChoiceId && (
-                  <CheckCircle className="text-green-600 absolute right-4 drop-shadow-sm" size={28} />
+                  <CheckCircle className="text-green-600 absolute right-12 drop-shadow-sm" size={28} />
                 )}
                 {isSubmitted && choice.id === selectedChoice && choice.id !== currentQuestion.correctChoiceId && (
-                  <XCircle className="text-red-500 absolute right-4 drop-shadow-sm" size={28} />
+                  <XCircle className="text-red-500 absolute right-12 drop-shadow-sm" size={28} />
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
@@ -258,16 +292,16 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
             </button>
           ) : (
             <div className="space-y-4">
-              <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-5 animate-fade-in shadow-sm">
-                <div className="flex justify-between items-start mb-2">
+              <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-5 animate-fade-in shadow-sm relative">
+                <div className="flex items-center justify-between mb-2">
                     <h3 className="font-bold text-green-800 flex items-center gap-2 text-lg">
                     <CheckCircle size={24} /> เฉลย
                     </h3>
-                    {/* 🔊 ปุ่มฟังเสียงเฉลย */}
+                    {/* 🔊 ปุ่มลำโพงสำหรับเฉลย */}
                     <button 
-                        onClick={(e) => handleSpeak(e, currentQuestion.explanation)}
-                        className="bg-green-200 text-green-800 p-2 rounded-full hover:bg-green-300 transition shadow-sm"
-                        title="ฟังเฉลย"
+                        onClick={() => speak(currentQuestion.explanation)}
+                        className="p-2 bg-white rounded-full text-green-600 hover:bg-green-100 shadow-sm border border-green-100 transition-colors"
+                        title="อ่านคำอธิบาย"
                     >
                         <Volume2 size={20} />
                     </button>

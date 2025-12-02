@@ -59,6 +59,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onTeacherLoginClick, students })
              <School size={40} />
           </div>
           <h2 className="text-2xl font-bold text-indigo-900 mb-1">LittleSchool LearnUp</h2>
+          <p className="text-indigo-600 font-medium text-sm mb-4">ก้าวเล็กๆ สู่ความสำเร็จที่ยิ่งใหญ่</p>
           <p className="text-gray-500 text-sm">พิมพ์รหัสประจำตัว 5 หลัก เพื่อเข้าเรียน</p>
         </div>
 

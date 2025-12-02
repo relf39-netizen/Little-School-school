@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { Teacher, Student, Subject, Assignment, Question, SubjectConfig } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, Users, GraduationCap, Trash2, Edit, Shield, UserCog, KeyRound, Sparkles, Wand2, Key, HelpCircle, ChevronDown, ChevronUp, Layers, Clock, Library, Palette, Type, AlertCircle, ArrowRight, BrainCircuit, List, CheckSquare, Trophy, Lock, User, Activity } from 'lucide-react';
-import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject } from '../services/api';
+import { Teacher, Student, Subject, Assignment, Question, SubjectConfig, School, RegistrationRequest } from '../types';
+import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, Users, GraduationCap, Trash2, Edit, Shield, UserCog, KeyRound, Sparkles, Wand2, Key, HelpCircle, ChevronDown, ChevronUp, Layers, Clock, Library, Palette, Type, AlertCircle, ArrowRight, BrainCircuit, List, CheckSquare, Trophy, Lock, User, Activity, Building, CreditCard, Check, ToggleLeft, ToggleRight } from 'lucide-react';
+import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration } from '../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../services/aiService';
 
 interface TeacherDashboardProps {
@@ -12,7 +12,7 @@ interface TeacherDashboardProps {
 }
 
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, onStartGame }) => {
-  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'subjects' | 'stats' | 'questions' | 'assignments' | 'teachers' | 'profile' | 'onet'>('menu');
+  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'subjects' | 'stats' | 'questions' | 'assignments' | 'teachers' | 'registrations' | 'profile' | 'onet'>('menu');
   
   const [students, setStudents] = useState<Student[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -28,6 +28,10 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   
   // Teacher Management State
   const [allTeachers, setAllTeachers] = useState<Teacher[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
+  const [selectedSchoolForView, setSelectedSchoolForView] = useState<string | null>(null); // To drill down
+  const [newSchoolName, setNewSchoolName] = useState('');
+
   const [newTeacherName, setNewTeacherName] = useState('');
   const [newTeacherUser, setNewTeacherUser] = useState('');
   const [newTeacherPass, setNewTeacherPass] = useState('');
@@ -35,6 +39,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const [newTeacherGrade, setNewTeacherGrade] = useState('ALL'); 
   const [editingTeacherId, setEditingTeacherId] = useState<string | null>(null); 
   
+  // Registration Management
+  const [regEnabled, setRegEnabled] = useState(false);
+  const [pendingRegs, setPendingRegs] = useState<RegistrationRequest[]>([]);
+  const [showApproveModal, setShowApproveModal] = useState<RegistrationRequest | null>(null);
+  const [approveToSchool, setApproveToSchool] = useState('');
+
   // Profile Management State
   const [profileName, setProfileName] = useState(teacher.name);
   const [profilePassword, setProfilePassword] = useState('');
@@ -94,7 +104,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   // Question Bank State
   const [qBankSubject, setQBankSubject] = useState<string | null>(null); 
   const [qBankPage, setQBankPage] = useState(1);
-  const [showMyQuestionsOnly, setShowMyQuestionsOnly] = useState(false); 
+  const [showMyQuestionsOnly, setShowMyQuestionsOnly] = useState(true); // ✅ Default to TRUE as requested
   const ITEMS_PER_PAGE = 5;
 
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
@@ -161,10 +171,16 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     const data = await getTeacherDashboard(teacher.school);
     const subs = await getSubjects(teacher.school);
     
-    // Load teachers if admin
+    // Load teachers and schools if admin
     if (isAdmin) {
-        const teachers = await getAllTeachers();
-        setAllTeachers(teachers);
+        const tList = await getAllTeachers();
+        setAllTeachers(tList);
+        const sList = await getSchools();
+        setSchools(sList);
+        const regStatus = await getRegistrationStatus();
+        setRegEnabled(regStatus);
+        const pending = await getPendingRegistrations();
+        setPendingRegs(pending);
     }
     
     const filteredSubjects = subs.filter(s => {
@@ -268,6 +284,51 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
       }
   };
 
+  // --- School Handlers ---
+  const handleAddSchool = async () => {
+      if (!newSchoolName) return;
+      setIsProcessing(true);
+      await manageSchool({ action: 'add', name: newSchoolName });
+      setIsProcessing(false);
+      setNewSchoolName('');
+      loadData();
+  };
+
+  const handleDeleteSchool = async (id: string) => {
+      if (!confirm('ลบโรงเรียนนี้?')) return;
+      await manageSchool({ action: 'delete', id });
+      loadData();
+  }
+
+  // --- Registration Handlers ---
+  const handleToggleReg = async () => {
+      const newState = !regEnabled;
+      setRegEnabled(newState);
+      await toggleRegistrationStatus(newState);
+  };
+
+  const handleApproveReg = async () => {
+      if (!showApproveModal || !approveToSchool) return alert('เลือกโรงเรียนก่อนอนุมัติ');
+      setIsProcessing(true);
+      const success = await approveRegistration(showApproveModal, approveToSchool);
+      setIsProcessing(false);
+      if (success) {
+          alert('✅ อนุมัติเรียบร้อย รหัสผ่านคือ 123456');
+          setShowApproveModal(null);
+          setApproveToSchool('');
+          loadData();
+      } else {
+          alert('เกิดข้อผิดพลาด');
+      }
+  };
+
+  const handleRejectReg = async (id: string) => {
+      if (!confirm('ปฏิเสธคำขอนี้?')) return;
+      await rejectRegistration(id);
+      loadData();
+  };
+
+  // --- Subject Handlers ---
   const handleAddSubject = async () => {
       if (!newSubjectName) return alert('กรุณากรอกชื่อวิชา');
       setIsProcessing(true);
@@ -331,7 +392,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
           setNewTeacherName(''); 
           setNewTeacherUser(''); 
           setNewTeacherPass(''); 
-          setNewTeacherSchool('');
+          if(!selectedSchoolForView) setNewTeacherSchool(''); // Keep school if in view mode
           setNewTeacherGrade('ALL');
           setEditingTeacherId(null);
           loadData();
@@ -437,27 +498,13 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   // --- AI ERROR HELPER ---
   const handleAiError = (e: any) => {
       console.error("AI Operation Error:", e);
-      
-      // Extract error message safely
       let errorMessage = '';
       if (typeof e === 'string') errorMessage = e;
       else if (e?.message) errorMessage = e.message;
       else errorMessage = JSON.stringify(e);
 
-      // Check for 429/Quota errors
-      if (errorMessage.includes('429') || 
-          errorMessage.includes('RESOURCE_EXHAUSTED') || 
-          errorMessage.includes('quota') ||
-          errorMessage.includes('rate limit')) {
-          
-          alert(
-              "⚠️ โควต้า API เต็ม (Error 429)\n\n" +
-              "Google แจ้งว่า API Key นี้ใช้งานเกินขีดจำกัดแล้ว\n\n" +
-              "วิธีแก้ไข:\n" +
-              "1. เปลี่ยนใช้ API Key อื่น (สมัครใหม่ฟรีที่ aistudio.google.com)\n" +
-              "2. หรือรอสักครู่ (หากเป็นการจำกัดรายนาที)\n" +
-              "3. ลดจำนวนข้อที่สร้างต่อครั้ง"
-          );
+      if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+          alert("⚠️ โควต้า API เต็ม (Error 429)\nGoogle แจ้งว่า API Key นี้ใช้งานเกินขีดจำกัดแล้ว");
       } else {
           alert("เกิดข้อผิดพลาด: " + errorMessage);
       }
@@ -470,235 +517,108 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
       
       setIsGeneratingAi(true);
       try {
-          const generated = await generateQuestionWithAI(
-              assignSubject, 
-              assignGrade, 
-              assignAiTopic, 
-              geminiApiKey, 
-              5 // Generate 5 at a time
-          );
-
-          if (generated) {
-             setNewlyGeneratedQuestions(prev => [...prev, ...generated]);
-          }
-      } catch (e) {
-          handleAiError(e);
-      } finally {
-          setIsGeneratingAi(false);
-      }
+          const generated = await generateQuestionWithAI(assignSubject, assignGrade, assignAiTopic, geminiApiKey, 5);
+          if (generated) setNewlyGeneratedQuestions(prev => [...prev, ...generated]);
+      } catch (e) { handleAiError(e); } finally { setIsGeneratingAi(false); }
   };
 
   // --- O-NET AI Generation Logic ---
   const handleOnetGenerateQuestions = async () => {
       if (!geminiApiKey) return alert("กรุณาใส่ API Key");
       if (!assignAiTopic) return alert("กรุณาระบุสาระที่ต้องการเน้น");
-      
       setIsGeneratingAi(true);
       try {
-          const generated = await generateQuestionWithAI(
-              assignSubject, 
-              'P6', // O-NET is for P6
-              assignAiTopic, 
-              geminiApiKey, 
-              5,
-              'onet' // Activate O-NET mode
-          );
-
-          if (generated) {
-             setNewlyGeneratedQuestions(prev => [...prev, ...generated]);
-          }
-      } catch (e) {
-          handleAiError(e);
-      } finally {
-          setIsGeneratingAi(false);
-      }
+          const generated = await generateQuestionWithAI(assignSubject, 'P6', assignAiTopic, geminiApiKey, 5, 'onet');
+          if (generated) setNewlyGeneratedQuestions(prev => [...prev, ...generated]);
+      } catch (e) { handleAiError(e); } finally { setIsGeneratingAi(false); }
   };
 
   const handleFinalizeAssignment = async () => {
-    // 1. Save new questions
     if (newlyGeneratedQuestions.length > 0) {
         setIsProcessing(true);
         setProcessingMessage(`กำลังบันทึกข้อสอบ ${newlyGeneratedQuestions.length} ข้อ...`);
-        
         const tid = normalizeId(teacher.id);
-        
         for (const q of newlyGeneratedQuestions) {
             await addQuestion({
-                subject: assignSubject,
-                grade: assignGrade,
-                text: q.text,
-                image: q.image || '',
-                c1: q.c1, c2: q.c2, c3: q.c3, c4: q.c4,
-                correct: q.correct,
-                explanation: q.explanation,
-                school: teacher.school,
-                teacherId: tid
+                subject: assignSubject, grade: assignGrade, text: q.text, image: q.image || '', c1: q.c1, c2: q.c2, c3: q.c3, c4: q.c4, correct: q.correct, explanation: q.explanation, school: teacher.school, teacherId: tid
             });
         }
     }
-
-    // 2. Save Assignment
     setProcessingMessage('กำลังสร้างการบ้าน...');
     const finalTitle = assignTitle || `การบ้าน ${assignSubject}`;
     const success = await addAssignment(teacher.school, assignSubject, assignGrade, assignCount, assignDeadline, teacher.name, finalTitle);
-    
     setIsProcessing(false);
-    
     if (success) { 
         alert('✅ สั่งการบ้านเรียบร้อยแล้ว'); 
-        setAssignStep(1);
-        setAssignDeadline(''); 
-        setAssignTitle('');
-        setNewlyGeneratedQuestions([]);
-        setAssignAiTopic('');
-        // If coming from O-NET tab, stay there.
-        if (activeTab === 'onet') {
-            await loadData();
-        } else {
-            setActiveTab('assignments'); 
-            await loadData();
-        }
-    } else { 
-        alert('เกิดข้อผิดพลาดในการสร้างการบ้าน'); 
-    }
+        setAssignStep(1); setAssignDeadline(''); setAssignTitle(''); setNewlyGeneratedQuestions([]); setAssignAiTopic('');
+        if (activeTab === 'onet') await loadData(); else { setActiveTab('assignments'); await loadData(); }
+    } else { alert('เกิดข้อผิดพลาดในการสร้างการบ้าน'); }
   };
-
 
   const handleDeleteAssignment = async (id: string) => {
     if (!confirm('ยืนยันลบการบ้านนี้?')) return;
     setIsProcessing(true);
     const success = await deleteAssignment(id);
     setIsProcessing(false);
-    if (success) {
-        setAssignments(prev => prev.filter(a => a.id !== id));
-        loadData();
-    }
+    if (success) { setAssignments(prev => prev.filter(a => a.id !== id)); loadData(); }
   };
 
   const handleViewAssignment = (a: Assignment) => {
       setSelectedAssignment(a);
-      setAssignmentModalTab('status'); // Reset tab
+      setAssignmentModalTab('status'); 
   };
 
   const handleSaveQuestion = async () => {
     if (!qText || !qChoices.c1 || !qChoices.c2 || !qSubject) return alert('กรุณากรอกข้อมูลให้ครบถ้วน');
     const tid = normalizeId(teacher.id);
-
     setIsProcessing(true);
     setProcessingMessage(editingQuestionId ? 'กำลังบันทึกการแก้ไข...' : 'กำลังบันทึกข้อสอบ...');
-    
-    const questionPayload = { 
-        id: editingQuestionId,
-        subject: qSubject, 
-        grade: qGrade, 
-        text: qText, 
-        image: qImage, 
-        c1: qChoices.c1, c2: qChoices.c2, c3: qChoices.c3, c4: qChoices.c4, 
-        correct: qCorrect, 
-        explanation: qExplain, 
-        school: teacher.school,
-        teacherId: tid
-    };
-
-    let success = false;
-    if (editingQuestionId) {
-        success = await editQuestion(questionPayload);
-    } else {
-        success = await addQuestion(questionPayload);
-    }
-
+    const questionPayload = { id: editingQuestionId, subject: qSubject, grade: qGrade, text: qText, image: qImage, c1: qChoices.c1, c2: qChoices.c2, c3: qChoices.c3, c4: qChoices.c4, correct: qCorrect, explanation: qExplain, school: teacher.school, teacherId: tid };
+    let success = editingQuestionId ? await editQuestion(questionPayload) : await addQuestion(questionPayload);
     setIsProcessing(false);
     if (success) { 
-        alert('✅ บันทึกสำเร็จ'); 
-        setQText(''); setQChoices({c1:'', c2:'', c3:'', c4:''});
-        setEditingQuestionId(null);
-        await loadData(); 
-    } else { 
-        alert('บันทึกไม่สำเร็จ'); 
-    }
+        alert('✅ บันทึกสำเร็จ'); setQText(''); setQChoices({c1:'', c2:'', c3:'', c4:''}); setEditingQuestionId(null); await loadData(); 
+    } else { alert('บันทึกไม่สำเร็จ'); }
   };
   
   const handleEditQuestion = (q: Question) => {
-    setEditingQuestionId(q.id);
-    setQSubject(q.subject);
-    setQGrade(q.grade || 'P6');
-    setQText(q.text);
-    setQImage(q.image || '');
-    setQCorrect(String(q.correctChoiceId));
-    setQExplain(q.explanation);
-    setQChoices({ c1: q.choices[0]?.text || '', c2: q.choices[1]?.text || '', c3: q.choices[2]?.text || '', c4: q.choices[3]?.text || '' });
+    setEditingQuestionId(q.id); setQSubject(q.subject); setQGrade(q.grade || 'P6'); setQText(q.text); setQImage(q.image || ''); setQCorrect(String(q.correctChoiceId)); setQExplain(q.explanation); setQChoices({ c1: q.choices[0]?.text || '', c2: q.choices[1]?.text || '', c3: q.choices[2]?.text || '', c4: q.choices[3]?.text || '' });
     document.getElementById('question-form')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const handleDeleteQuestion = async (id: string) => {
       if(!confirm('ลบข้อสอบนี้?')) return;
-      setIsProcessing(true);
-      await deleteQuestion(id);
-      setIsProcessing(false);
-      loadData();
+      setIsProcessing(true); await deleteQuestion(id); setIsProcessing(false); loadData();
   };
 
-  // ----------------------------------------
-  // AI GENERATOR LOGIC (Question Bank)
-  // ----------------------------------------
-
+  // AI GENERATOR LOGIC
   const handleAiGenerate = async () => {
       if (!aiTopic || !geminiApiKey) return alert("กรุณาระบุหัวข้อและ API Key");
       setIsGeneratingAi(true);
       try {
-          const generated = await generateQuestionWithAI(
-              aiSourceMode === 'assignment' ? assignSubject : qSubject, 
-              aiSourceMode === 'assignment' ? assignGrade : qGrade, 
-              aiTopic, 
-              geminiApiKey, 
-              aiCount
-          );
-
-          if (generated) {
-             setAiPreviewQuestions(prev => [...prev, ...generated]); // Append to list
-          }
-      } catch (e) {
-          handleAiError(e);
-      } finally {
-          setIsGeneratingAi(false);
-      }
+          const generated = await generateQuestionWithAI(aiSourceMode === 'assignment' ? assignSubject : qSubject, aiSourceMode === 'assignment' ? assignGrade : qGrade, aiTopic, geminiApiKey, aiCount);
+          if (generated) setAiPreviewQuestions(prev => [...prev, ...generated]);
+      } catch (e) { handleAiError(e); } finally { setIsGeneratingAi(false); }
   };
 
   const handleSaveAiQuestions = async () => {
       if (aiPreviewQuestions.length === 0) return;
       setIsProcessing(true);
       setProcessingMessage(`กำลังบันทึก ${aiPreviewQuestions.length} ข้อลงคลัง...`);
-      
       const targetSubject = aiSourceMode === 'assignment' ? assignSubject : qSubject;
       const targetGrade = aiSourceMode === 'assignment' ? assignGrade : qGrade;
       const tid = normalizeId(teacher.id);
-
       let successCount = 0;
       for (const q of aiPreviewQuestions) {
-          const success = await addQuestion({
-              subject: targetSubject,
-              grade: targetGrade,
-              text: q.text,
-              image: q.image || '',
-              c1: q.c1, c2: q.c2, c3: q.c3, c4: q.c4,
-              correct: q.correct,
-              explanation: q.explanation,
-              school: teacher.school,
-              teacherId: tid
-          });
+          const success = await addQuestion({ subject: targetSubject, grade: targetGrade, text: q.text, image: q.image || '', c1: q.c1, c2: q.c2, c3: q.c3, c4: q.c4, correct: q.correct, explanation: q.explanation, school: teacher.school, teacherId: tid });
           if (success) successCount++;
       }
-      
       setIsProcessing(false);
       alert(`✅ บันทึกสำเร็จ ${successCount} ข้อ`);
-      setAiPreviewQuestions([]);
-      setShowAiModal(false);
-      loadData();
+      setAiPreviewQuestions([]); setShowAiModal(false); loadData();
   };
 
-  // ----------------------------------------
-  // Helper Logic
-  // ----------------------------------------
+  // Helpers
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
@@ -708,17 +628,24 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
   const getFilteredQuestions = () => { 
       const currentTid = normalizeId(teacher.id);
+      let result = questions;
+
+      // 1. Filter by Owner (if enabled)
+      // If showMyQuestionsOnly is true, we strictly filter by teacherId.
       if (showMyQuestionsOnly) {
-          if (!currentTid) return [];
-          return questions.filter(q => normalizeId(q.teacherId) === currentTid);
+          if (!currentTid) result = [];
+          else result = result.filter(q => normalizeId(q.teacherId) === currentTid);
+      } else {
+          // If not strict "My Questions", we show what was fetched (school + center + admin)
+          // The fetch logic in API already handles this filtering.
       }
-      if (!qBankSubject) return []; 
-      return questions.filter(q => { 
-          if (q.subject !== qBankSubject) return false; 
-          const isMine = isAdmin || (currentTid && normalizeId(q.teacherId) === currentTid);
-          if (isMine) return true;
-          return q.school === teacher.school; 
-      }); 
+
+      // 2. Filter by Subject (if selected)
+      if (qBankSubject) {
+          result = result.filter(q => q.subject === qBankSubject);
+      }
+
+      return result;
   };
   
   const filteredQuestions = getFilteredQuestions();
@@ -726,34 +653,19 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const myCreatedSubjects = availableSubjects.filter(s => s.teacherId === normalizeId(teacher.id));
 
   const countSubmitted = (assignmentId: string) => {
-      const submittedStudentIds = new Set(
-        stats.filter(r => r.assignmentId === assignmentId).map(r => r.studentId)
-      );
+      const submittedStudentIds = new Set(stats.filter(r => r.assignmentId === assignmentId).map(r => r.studentId));
       return submittedStudentIds.size;
   };
 
   const getAssignmentQuestions = (assignment: Assignment) => {
-      let qList = questions.filter(q => 
-          (q.subject === assignment.subject) &&
-          (q.school === assignment.school || q.school === 'CENTER' || q.school === 'Admin')
-      );
-      
-      if (assignment.grade && assignment.grade !== 'ALL') {
-          qList = qList.filter(q => q.grade === assignment.grade || q.grade === 'ALL');
-      }
-
-      // Logic: Reverse to get newest, then slice by count
+      let qList = questions.filter(q => (q.subject === assignment.subject) && (q.school === assignment.school || q.school === 'CENTER' || q.school === 'Admin'));
+      if (assignment.grade && assignment.grade !== 'ALL') qList = qList.filter(q => q.grade === assignment.grade || q.grade === 'ALL');
       return [...qList].reverse().slice(0, assignment.questionCount);
   };
 
-  // ✅ Separate O-NET and Normal Assignments
   const onetAssignments = assignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
   const normalAssignments = assignments.filter(a => !a.title || !a.title.startsWith('[O-NET]'));
-
-  // Filter O-NET by Subject Tab
-  const filteredOnetAssignments = onetSubjectFilter === 'ALL' 
-    ? onetAssignments 
-    : onetAssignments.filter(a => a.subject === onetSubjectFilter);
+  const filteredOnetAssignments = onetSubjectFilter === 'ALL' ? onetAssignments : onetAssignments.filter(a => a.subject === onetSubjectFilter);
 
   return (
     <div className="max-w-6xl mx-auto pb-20 relative">
@@ -764,7 +676,33 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         </div>
        )}
 
-      {/* AI Generator Modal (Question Bank Only) */}
+      {/* APPROVE REGISTRATION MODAL */}
+      {showApproveModal && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in">
+                  <div className="bg-green-600 p-4 text-white font-bold flex justify-between items-center">
+                      <span>อนุมัติสมาชิกใหม่</span>
+                      <button onClick={() => {setShowApproveModal(null); setApproveToSchool('');}}><X size={20}/></button>
+                  </div>
+                  <div className="p-6">
+                      <div className="mb-4">
+                          <div className="text-gray-500 text-xs">ชื่อ-นามสกุล</div>
+                          <div className="font-bold text-lg">{showApproveModal.name} {showApproveModal.surname}</div>
+                          <div className="text-gray-500 text-xs mt-2">เลขบัตรประชาชน</div>
+                          <div className="font-mono bg-gray-100 p-2 rounded">{showApproveModal.citizenId}</div>
+                      </div>
+                      <label className="block text-sm font-bold text-gray-700 mb-2">เลือกโรงเรียนสังกัด</label>
+                      <select value={approveToSchool} onChange={e => setApproveToSchool(e.target.value)} className="w-full p-2 border rounded-lg bg-white mb-4">
+                          <option value="">-- เลือกโรงเรียน --</option>
+                          {schools.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
+                      <button onClick={handleApproveReg} className="w-full bg-green-600 text-white py-2 rounded-lg font-bold hover:bg-green-700">ยืนยันอนุมัติ</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* AI Generator Modal ... (Same as before) */}
       {showAiModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -876,13 +814,22 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
             {/* Admin Only Card */}
             {isAdmin && (
+                <>
+                <MenuCard 
+                  icon={<Building size={40} />} 
+                  title="จัดการข้อมูลครู" 
+                  desc="จัดการโรงเรียนและครู" 
+                  color="bg-gray-100 text-gray-700 border-gray-300" 
+                  onClick={() => {setActiveTab('teachers'); setSelectedSchoolForView(null);}} 
+                />
                 <MenuCard 
                   icon={<UserCog size={40} />} 
-                  title="จัดการข้อมูลครู" 
-                  desc="เพิ่ม/ลบ บัญชีผู้ใช้ครู" 
-                  color="bg-gray-100 text-gray-700 border-gray-300" 
-                  onClick={() => setActiveTab('teachers')} 
+                  title="ระบบรับสมัครสมาชิก" 
+                  desc={`รออนุมัติ ${pendingRegs.length} คน`}
+                  color="bg-red-50 text-red-600 border-red-200" 
+                  onClick={() => setActiveTab('registrations')} 
                 />
+                </>
             )}
         </div>
       )}
@@ -891,411 +838,17 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         <div className="bg-white rounded-3xl shadow-sm p-4 md:p-6 min-h-[400px] relative animate-fade-in">
             <button onClick={() => { setActiveTab('menu'); setEditingStudentId(null); setCreatedStudent(null); setSelectedStudentForStats(null); }} className="mb-6 flex items-center gap-2 text-gray-500 hover:text-purple-600 font-bold transition-colors"><div className="bg-gray-100 p-2 rounded-full"><ArrowLeft size={20} /></div> กลับเมนูหลัก</button>
             
-            {activeTab === 'profile' && (
-                <div className="max-w-xl mx-auto">
-                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><User className="text-teal-600"/> จัดการข้อมูลส่วนตัว</h3>
-                    <div className="bg-teal-50 p-6 rounded-2xl border border-teal-200 shadow-sm">
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อ-นามสกุล</label>
-                                <input type="text" value={profileName} onChange={e => setProfileName(e.target.value)} className="w-full p-3 border rounded-xl bg-white" />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">เปลี่ยนรหัสผ่าน (เว้นว่างถ้าไม่เปลี่ยน)</label>
-                                <input type="password" value={profilePassword} onChange={e => setProfilePassword(e.target.value)} className="w-full p-3 border rounded-xl bg-white mb-2" placeholder="รหัสผ่านใหม่" />
-                                <input type="password" value={profileConfirmPass} onChange={e => setProfileConfirmPass(e.target.value)} className="w-full p-3 border rounded-xl bg-white" placeholder="ยืนยันรหัสผ่านใหม่" />
-                            </div>
-                            <div className="pt-2">
-                                <div className="text-xs text-gray-500 mb-2">
-                                    <div>โรงเรียน: {teacher.school}</div>
-                                    <div>Username: {teacher.username}</div>
-                                    <div>ระดับชั้น: {teacher.gradeLevel || 'ALL'}</div>
-                                </div>
-                                <button onClick={handleUpdateProfile} disabled={isProcessing} className="w-full bg-teal-600 text-white py-3 rounded-xl font-bold shadow hover:bg-teal-700 disabled:opacity-50">
-                                    {isProcessing ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* STATS TAB (UPDATED) */}
-            {activeTab === 'stats' && (
-                <div className="max-w-6xl mx-auto">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2"><BarChart2 className="text-green-600"/> คะแนนสอบของนักเรียน</h3>
-                        <button onClick={loadData} className="flex items-center gap-2 text-sm bg-white border px-3 py-2 rounded-lg hover:bg-gray-50"><RefreshCw size={14}/> รีเฟรชข้อมูล</button>
-                    </div>
-                    <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-green-50 text-green-900 font-bold border-b border-green-100">
-                                <tr><th className="p-4">รูป</th><th className="p-4">ข้อมูลนักเรียน</th><th className="p-4 text-center">เข้าใช้งาน (ครั้ง)</th><th className="p-4 text-center">คะแนนเฉลี่ยรวม</th><th className="p-4 text-right">รายละเอียด</th></tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {students.map((s) => {
-                                    const { attempts, average } = getStudentOverallStats(s.id);
-                                    return (
-                                        <tr key={s.id} className="hover:bg-gray-50">
-                                            <td className="p-4 w-16 text-center"><span className="text-2xl">{s.avatar}</span></td>
-                                            <td className="p-4">
-                                                <div className="font-bold text-gray-800">{s.name}</div>
-                                                <div className="text-xs text-gray-500 font-mono">ID: {s.id} <span className="bg-gray-100 px-1 rounded ml-2">{GRADE_LABELS[s.grade || 'P6'] || s.grade}</span></div>
-                                            </td>
-                                            <td className="p-4 text-center font-bold text-gray-700">{attempts}</td>
-                                            <td className="p-4 text-center">
-                                                {attempts > 0 ? (
-                                                    <span className={`px-2 py-1 rounded font-bold text-xs ${average >= 80 ? 'bg-green-100 text-green-700' : average >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
-                                                        {average}%
-                                                    </span>
-                                                ) : <span className="text-gray-400">-</span>}
-                                            </td>
-                                            <td className="p-4 text-right">
-                                                <button onClick={() => setSelectedStudentForStats(s)} className="text-blue-600 hover:bg-blue-50 px-3 py-1 rounded border border-blue-200 text-xs font-bold transition">
-                                                    ดูรายละเอียด
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                                {students.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">ไม่มีข้อมูลนักเรียน</td></tr>}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            )}
-
-            {/* O-NET TAB */}
-            {activeTab === 'onet' && isP6OrAdmin && (
-              <div className="max-w-4xl mx-auto">
-                 <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 mb-8 shadow-sm">
-                    <h4 className="font-bold text-indigo-900 mb-4 flex items-center gap-2 text-xl"><Trophy className="text-yellow-500"/> ติวเข้มพิชิต O-NET (ป.6)</h4>
-                    
-                    <div className="space-y-4 animate-fade-in">
-                        {/* INPUT SECTION */}
-                        <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm">
-                           <div className="grid md:grid-cols-2 gap-4 mb-4">
-                               <div>
-                                   <label className="text-xs font-bold text-gray-500 block mb-1">วิชา (4 วิชาหลัก)</label>
-                                   <select value={assignSubject} onChange={(e) => setAssignSubject(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white text-gray-900 outline-none">
-                                       <option value="">-- เลือกวิชา --</option>
-                                       {ONET_SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
-                                   </select>
-                               </div>
-                               <div>
-                                   <label className="text-xs font-bold text-gray-500 block mb-1">จำนวนข้อ</label>
-                                   <input type="number" value={assignCount} onChange={(e) => setAssignCount(Number(e.target.value))} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" min="5" max="20" />
-                               </div>
-                               <div>
-                                   <label className="text-xs font-bold text-gray-500 block mb-1">กำหนดส่ง</label>
-                                   <input type="date" value={assignDeadline} onChange={(e) => setAssignDeadline(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" />
-                               </div>
-                               <div>
-                                   <label className="text-xs font-bold text-gray-500 block mb-1">สาระที่ต้องการเน้น (Topic)</label>
-                                   <input type="text" value={assignAiTopic} onChange={(e) => setAssignAiTopic(e.target.value)} placeholder="เช่น พีชคณิต, การอ่านจับใจความ" className="w-full p-2.5 rounded-lg border border-gray-300 bg-white outline-none" />
-                               </div>
-                           </div>
-                           
-                           <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1">Google Gemini API Key</label>
-                                <div className="flex gap-2">
-                                    <input type="password" value={geminiApiKey} onChange={(e) => { setGeminiApiKey(e.target.value); localStorage.setItem('gemini_api_key', e.target.value); }} className="flex-1 p-2 border rounded-lg text-sm bg-gray-50" placeholder="วาง API Key ที่นี่..." />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* GENERATE BUTTON */}
-                        <div className="flex justify-end">
-                            <button 
-                                onClick={handleOnetGenerateQuestions}
-                                disabled={isGeneratingAi || !assignSubject || !assignAiTopic}
-                                className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:scale-105 transition disabled:opacity-50 flex items-center gap-2"
-                            >
-                                {isGeneratingAi ? <RefreshCw className="animate-spin"/> : <Sparkles size={18}/>}
-                                สร้างข้อสอบ O-NET ด้วย AI
-                            </button>
-                        </div>
-                        
-                        <div className="text-xs text-center text-indigo-400">
-                             *ระบบจะวิเคราะห์แนวข้อสอบเก่า O-NET ปี 2560-2566 เพื่อสร้างข้อสอบใหม่ที่ใกล้เคียงที่สุด
-                        </div>
-
-                        {/* PREVIEW LIST */}
-                        {newlyGeneratedQuestions.length > 0 && (
-                          <div className="border rounded-xl overflow-hidden bg-white mt-6 shadow-md border-indigo-200">
-                              <div className="bg-indigo-50 p-3 flex justify-between items-center border-b border-indigo-100">
-                                  <span className="font-bold text-indigo-900 text-sm">ตัวอย่างข้อสอบ ({newlyGeneratedQuestions.length} ข้อ)</span>
-                                  <button onClick={() => setNewlyGeneratedQuestions([])} className="text-xs text-red-500 hover:underline">ล้างทั้งหมด</button>
-                              </div>
-                              <div className="max-h-60 overflow-y-auto p-2 space-y-2">
-                                  {newlyGeneratedQuestions.map((q, i) => (
-                                      <div key={i} className="p-3 border rounded-lg bg-gray-50 text-sm relative group">
-                                          <div className="font-bold text-gray-800 pr-6">{i+1}. {q.text}</div>
-                                          <div className="text-gray-500 text-xs mt-1">ตอบ: {q.correct} | {q.explanation}</div>
-                                          <button onClick={() => setNewlyGeneratedQuestions(prev => prev.filter((_, idx) => idx !== i))} className="absolute top-2 right-2 text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
-                                      </div>
-                                  ))}
-                              </div>
-                              <div className="p-4 border-t bg-gray-50">
-                                  <div className="flex gap-2 mb-4">
-                                      <button 
-                                          onClick={handleOnetGenerateQuestions}
-                                          disabled={isGeneratingAi}
-                                          className="flex-1 py-2 bg-indigo-100 text-indigo-600 rounded-lg font-bold text-sm hover:bg-indigo-200 flex items-center justify-center gap-2"
-                                      >
-                                          {isGeneratingAi ? <RefreshCw size={14} className="animate-spin"/> : <PlusCircle size={14}/>} เพิ่มข้อสอบอีก
-                                      </button>
-                                  </div>
-
-                                  <div className="mb-2">
-                                     <label className="text-xs font-bold text-gray-500">ชื่อการบ้าน (ตั้งชื่ออัตโนมัติ)</label>
-                                     <input 
-                                       type="text" 
-                                       value={assignTitle || `[O-NET] ฝึกฝน${assignSubject} เรื่อง ${assignAiTopic}`} 
-                                       onChange={e => setAssignTitle(e.target.value)} 
-                                       className="w-full p-2 border rounded-lg bg-white"
-                                     />
-                                  </div>
-                                  <button 
-                                      onClick={handleFinalizeAssignment}
-                                      disabled={isProcessing}
-                                      className="w-full bg-green-500 text-white py-3 rounded-xl font-bold shadow hover:bg-green-600 disabled:opacity-50 flex justify-center items-center gap-2"
-                                  >
-                                      {isProcessing ? 'กำลังบันทึก...' : <><Save size={20}/> บันทึกเป็นการบ้าน</>}
-                                  </button>
-                              </div>
-                          </div>
-                        )}
-                    </div>
-                 </div>
-
-                 {/* O-NET ASSIGNMENT LIST (Separated Tabs) */}
-                 <div className="mt-8">
-                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                            <List size={20}/> รายการติว O-NET ({filteredOnetAssignments.length})
-                        </h3>
-                        {/* Subject Filter Tabs */}
-                        <div className="flex bg-gray-100 p-1 rounded-lg">
-                            <button 
-                                onClick={() => setOnetSubjectFilter('ALL')} 
-                                className={`px-3 py-1 rounded-md text-xs font-bold transition ${onetSubjectFilter === 'ALL' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
-                            >
-                                ทั้งหมด
-                            </button>
-                            {ONET_SUBJECTS.map(subj => (
-                                <button 
-                                    key={subj}
-                                    onClick={() => setOnetSubjectFilter(subj)}
-                                    className={`px-3 py-1 rounded-md text-xs font-bold transition ${onetSubjectFilter === subj ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
-                                >
-                                    {subj}
-                                </button>
-                            ))}
-                        </div>
-                     </div>
-
-                     {filteredOnetAssignments.length === 0 ? (
-                         <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-xl bg-gray-50">
-                             {onetSubjectFilter === 'ALL' ? 'ยังไม่ได้สร้างรายการติว O-NET' : `ไม่พบรายการติววิชา${onetSubjectFilter}`}
-                         </div>
-                     ) : (
-                         <div className="space-y-3">
-                             {filteredOnetAssignments.slice().reverse().map(a => (
-                                 <div key={a.id} className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center hover:shadow-md transition">
-                                     <div className="mb-2 md:mb-0">
-                                         <div className="font-bold text-indigo-900 text-lg">{a.title}</div>
-                                         <div className="text-sm text-gray-500 flex gap-4">
-                                             <span className="bg-indigo-50 text-indigo-600 px-2 rounded text-xs font-bold flex items-center">{a.subject}</span>
-                                             <span>{a.questionCount} ข้อ</span>
-                                             <span>กำหนดส่ง: {formatDate(a.deadline)}</span>
-                                         </div>
-                                     </div>
-                                     <div className="flex items-center gap-2">
-                                          <button onClick={() => handleViewAssignment(a)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-100">ดูรายละเอียด</button>
-                                          <button onClick={() => handleDeleteAssignment(a.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100"><Trash2 size={16}/></button>
-                                     </div>
-                                 </div>
-                             ))}
-                         </div>
-                     )}
-                 </div>
-              </div>
-            )}
-
-            {/* TEACHER MANAGEMENT TAB (Admin Only) */}
-            {activeTab === 'teachers' && isAdmin && (
-                <div className="max-w-4xl mx-auto" id="teacher-form">
-                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><UserCog className="text-gray-600"/> จัดการข้อมูลครู</h3>
-                    
-                    <div className={`p-6 rounded-2xl border mb-8 shadow-sm transition-colors ${editingTeacherId ? 'bg-orange-50 border-orange-100' : 'bg-gray-50 border-gray-200'}`}>
-                        <h4 className={`font-bold mb-4 flex items-center gap-2 ${editingTeacherId ? 'text-orange-800' : 'text-gray-700'}`}>
-                            {editingTeacherId ? <><Edit size={18}/> แก้ไขข้อมูลครู</> : <><PlusCircle size={18}/> เพิ่มบัญชีครู</>}
-                        </h4>
-                        <div className="grid md:grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อ-นามสกุล</label>
-                                <input type="text" value={newTeacherName} onChange={e => setNewTeacherName(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder="เช่น ครูสมศรี ใจดี" />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">โรงเรียน</label>
-                                <input type="text" value={newTeacherSchool} onChange={e => setNewTeacherSchool(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder={`ค่าเริ่มต้น: ${teacher.school}`} />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">Username (สำหรับเข้าสู่ระบบ)</label>
-                                <input type="text" value={newTeacherUser} onChange={e => setNewTeacherUser(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder="เช่น somsie" />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">Password {editingTeacherId && '(เว้นว่างถ้าไม่เปลี่ยน)'}</label>
-                                <input type="text" value={newTeacherPass} onChange={e => setNewTeacherPass(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder={editingTeacherId ? "เว้นว่างไว้หากไม่เปลี่ยน" : "กำหนดรหัสผ่าน"} />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">ระดับชั้นที่ดูแล</label>
-                                <select value={newTeacherGrade} onChange={(e) => setNewTeacherGrade(e.target.value)} className="w-full p-2 border rounded-lg bg-white outline-none">
-                                    <option value="ALL">ทุกระดับชั้น (Admin/Director)</option>
-                                    {GRADES.map(g => (
-                                        <option key={g} value={g}>{GRADE_LABELS[g]}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
-                        <div className="flex gap-2">
-                            {editingTeacherId && (
-                                <button onClick={() => { setEditingTeacherId(null); setNewTeacherName(''); setNewTeacherUser(''); setNewTeacherPass(''); setNewTeacherSchool(''); setNewTeacherGrade('ALL'); }} className="px-6 py-2 bg-gray-200 rounded-lg font-bold text-gray-600 hover:bg-gray-300">ยกเลิก</button>
-                            )}
-                            <button onClick={handleSaveTeacher} disabled={isProcessing} className={`flex-1 text-white py-2 rounded-lg font-bold shadow transition ${editingTeacherId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-gray-800 hover:bg-black'}`}>
-                                {isProcessing ? 'กำลังบันทึก...' : (editingTeacherId ? 'บันทึกการแก้ไข' : '+ เพิ่มบัญชีครู')}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl border overflow-hidden">
-                        <div className="p-4 bg-gray-100 font-bold text-gray-600 border-b">รายชื่อครูทั้งหมด ({allTeachers.length})</div>
-                        {allTeachers.length === 0 ? <div className="p-6 text-center text-gray-400">ไม่พบข้อมูล</div> : (
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-gray-50 text-gray-500">
-                                    <tr><th className="p-3">ชื่อ</th><th className="p-3">Username</th><th className="p-3">โรงเรียน</th><th className="p-3">ชั้น</th><th className="p-3 text-right">จัดการ</th></tr>
-                                </thead>
-                                <tbody>
-                                    {allTeachers.map(t => (
-                                        <tr key={t.id} className="border-b last:border-0 hover:bg-gray-50">
-                                            <td className="p-3 font-bold">{t.name} {t.role === 'ADMIN' && <span className="bg-yellow-100 text-yellow-800 text-[10px] px-1 rounded ml-1">ADMIN</span>}</td>
-                                            <td className="p-3 font-mono text-gray-500">{t.username}</td>
-                                            <td className="p-3 text-gray-600">{t.school}</td>
-                                            <td className="p-3 text-gray-600">
-                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${!t.gradeLevel || t.gradeLevel === 'ALL' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-                                                    {(!t.gradeLevel || t.gradeLevel === 'ALL') ? 'ทุกชั้น' : GRADE_LABELS[t.gradeLevel] || t.gradeLevel}
-                                                </span>
-                                            </td>
-                                            <td className="p-3 text-right">
-                                                {String(t.id) !== String(teacher.id) && t.role !== 'ADMIN' && (
-                                                    <div className="flex justify-end gap-2">
-                                                        <button onClick={() => handleEditTeacher(t)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit size={16}/></button>
-                                                        <button onClick={() => handleDeleteTeacher(String(t.id))} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                                                    </div>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* SUBJECT MANAGEMENT TAB */}
-            {activeTab === 'subjects' && (
-                <div className="max-w-3xl mx-auto">
-                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Library className="text-pink-500"/> รายวิชาของฉัน</h3>
-                    <div className="bg-pink-50 p-6 rounded-2xl border border-pink-100 mb-6 shadow-sm">
-                        <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><PlusCircle size={18}/> เพิ่มรายวิชาใหม่</h4>
-                        
-                        <div className="grid md:grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อวิชา</label>
-                                <input 
-                                    type="text" 
-                                    value={newSubjectName} 
-                                    onChange={e => setNewSubjectName(e.target.value)} 
-                                    placeholder="เช่น คณิตศาสตร์, สังคมศึกษา" 
-                                    className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-pink-200 outline-none"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">ไอคอนประจำวิชา</label>
-                                <div className="relative">
-                                    <select value={newSubjectIcon} onChange={e => setNewSubjectIcon(e.target.value)} className="w-full p-3 border rounded-xl appearance-none bg-white pr-8 outline-none">
-                                        {SUBJECT_ICONS.map(i => <option key={i.name} value={i.name}>{i.name}</option>)}
-                                    </select>
-                                    <div className="absolute right-3 top-3 text-gray-400 pointer-events-none">
-                                        {SUBJECT_ICONS.find(i=>i.name===newSubjectIcon)?.component}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="mb-6">
-                            <label className="text-xs font-bold text-gray-500 block mb-2">เลือกสีการ์ด</label>
-                            <div className="flex flex-wrap gap-2">
-                                {CARD_COLORS.map(c => (
-                                    <button 
-                                        key={c.name} 
-                                        onClick={() => setNewSubjectColor(c.class)}
-                                        className={`px-4 py-2 rounded-lg border-2 font-bold text-sm transition-all ${newSubjectColor === c.class ? 'ring-2 ring-pink-400 scale-105 shadow-md ' + c.class : 'bg-white border-gray-200 text-gray-500 opacity-60 hover:opacity-100'}`}
-                                    >
-                                        {c.name}
-                                    </button>
-                                ))}
-                            </div>
-                            {/* Preview */}
-                            <div className={`mt-4 p-4 rounded-xl border-2 flex items-center gap-3 ${newSubjectColor}`}>
-                                <div className="bg-white/50 p-2 rounded-full">
-                                    {SUBJECT_ICONS.find(i=>i.name===newSubjectIcon)?.component}
-                                </div>
-                                <span className="font-bold">{newSubjectName || 'ตัวอย่างชื่อวิชา'}</span>
-                            </div>
-                        </div>
-
-                        <button onClick={handleAddSubject} disabled={!newSubjectName} className="w-full bg-pink-500 text-white py-3 rounded-xl font-bold shadow hover:bg-pink-600 disabled:opacity-50 transition">
-                            บันทึกรายวิชา
-                        </button>
-                    </div>
-
-                    <div className="space-y-3">
-                        <h4 className="font-bold text-gray-700">รายวิชาที่มีอยู่ ({myCreatedSubjects.length})</h4>
-                        {myCreatedSubjects.length === 0 ? (
-                            <div className="text-gray-400 text-center py-10 border-2 border-dashed rounded-xl">ยังไม่ได้สร้างรายวิชา</div>
-                        ) : (
-                            <div className="grid md:grid-cols-2 gap-3">
-                                {myCreatedSubjects.map(s => (
-                                    <div key={s.id} className={`flex items-center justify-between p-4 border rounded-xl hover:shadow-md transition ${s.color}`}>
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 bg-white/60 rounded-full flex items-center justify-center backdrop-blur-sm shadow-sm">
-                                                {SUBJECT_ICONS.find(i => i.name === s.icon)?.component || <Book />}
-                                            </div>
-                                            <span className="font-bold">{s.name}</span>
-                                        </div>
-                                        <button onClick={() => handleDeleteSubject(s.id)} className="bg-white/50 hover:bg-white p-2 rounded-lg text-red-500 transition"><Trash2 size={18}/></button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
             {/* ASSIGNMENTS TAB */}
             {activeTab === 'assignments' && (
               <div className="max-w-4xl mx-auto">
-                 <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 mb-8 shadow-sm">
-                    <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-orange-500"/> สั่งงานใหม่</h4>
-                    
-                    {availableSubjects.length === 0 ? (
+                 {availableSubjects.length === 0 ? (
                         <div className="text-red-500 text-center p-4 bg-red-50 rounded-xl border border-red-200 mb-4">
                             กรุณาไปที่เมนู "จัดการรายวิชา" เพื่อเพิ่มวิชาก่อนสั่งงาน
                         </div>
-                    ) : (
+                 ) : (
+                 <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 mb-8 shadow-sm">
+                    <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-orange-500"/> สั่งงานใหม่</h4>
+                    
                     <div>
                         {/* Step 1: Assignment Details */}
                         {assignStep === 1 && (
@@ -1429,8 +982,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             </div>
                         )}
                     </div>
-                    )}
                  </div>
+                 )}
 
                  <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-bold text-gray-800">รายการการบ้าน ({normalAssignments.length})</h3>
@@ -1511,7 +1064,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                       </div>
 
                       {availableSubjects.length === 0 ? (
-                           <div className="text-red-500 text-center p-4">กรุณาสร้างรายวิชาก่อนเพิ่มข้อสอบ</div>
+                           <div className="text-red-500 text-center p-4">กรุณาสร้างรายวิชาก่อนเพิ่มข้อสอบด้วยตนเอง</div>
                       ) : (
                       <>
                       <div className="grid grid-cols-2 gap-4 mb-4">
@@ -1566,9 +1119,19 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                       )}
                   </div>
     
-                  {/* Subject Filter Chips */}
-                  {!showMyQuestionsOnly && (
+                  {/* Subject Filter Chips - Always Visible if Subjects exist */}
+                  {availableSubjects.length > 0 && (
                       <div className="flex flex-wrap gap-2 mb-6">
+                         <button 
+                            onClick={() => { setQBankSubject(null); setQBankPage(1); }}
+                            className={`px-4 py-2 rounded-full border transition-all ${
+                                !qBankSubject 
+                                ? 'bg-gray-800 text-white border-gray-800 font-bold shadow-sm' 
+                                : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                            }`}
+                        >
+                            ทั้งหมด
+                        </button>
                          {availableSubjects.map(sub => (
                             <button 
                                 key={sub.id}
@@ -1586,47 +1149,302 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                   )}
     
                   {/* Question List */}
-                  {(qBankSubject || showMyQuestionsOnly) ? (
-                      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                           <div className="p-4 bg-gray-50 font-bold text-gray-700">รายการข้อสอบ ({filteredQuestions.length})</div>
-                           <div className="divide-y divide-gray-100">
-                               {currentQuestions.map((q, idx) => (
-                                   <div key={q.id} className="p-5 hover:bg-blue-50 transition">
-                                       <div className="flex justify-between">
-                                            <span className="font-bold text-gray-800">{q.text}</span>
-                                            {normalizeId(q.teacherId) === normalizeId(teacher.id) && (
-                                                <div className="flex gap-2">
-                                                    <button onClick={()=>handleEditQuestion(q)}><Edit size={16} className="text-blue-500"/></button>
-                                                    <button onClick={()=>handleDeleteQuestion(q.id)}><Trash2 size={16} className="text-red-500"/></button>
-                                                </div>
-                                            )}
-                                       </div>
-                                       <div className="text-xs text-gray-400 mt-2 flex gap-3">
-                                           <span>ID: {q.id}</span>
-                                           <span className="bg-gray-100 px-1 rounded text-gray-500">{GRADE_LABELS[q.grade || ''] || q.grade}</span>
-                                           <span>วิชา: {q.subject}</span>
-                                       </div>
-                                   </div>
-                               ))}
-                           </div>
-                           
-                           {/* Pagination */}
-                           {filteredQuestions.length > ITEMS_PER_PAGE && (
-                               <div className="p-4 border-t flex justify-center gap-2">
-                                   <button disabled={qBankPage===1} onClick={()=>setQBankPage(p=>p-1)} className="p-2 border rounded hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16}/></button>
-                                   <span className="p-2 text-sm text-gray-500">หน้า {qBankPage}</span>
-                                   <button disabled={qBankPage * ITEMS_PER_PAGE >= filteredQuestions.length} onClick={()=>setQBankPage(p=>p+1)} className="p-2 border rounded hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16}/></button>
-                               </div>
-                           )}
-                      </div>
-                  ) : (
-                      <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-2xl bg-gray-50">
-                          กรุณาเลือกวิชา หรือกด "ของฉัน" เพื่อดูข้อสอบ
-                      </div>
-                  )}
+                  <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="p-4 bg-gray-50 font-bold text-gray-700">รายการข้อสอบ ({filteredQuestions.length})</div>
+                        <div className="divide-y divide-gray-100">
+                            {currentQuestions.length > 0 ? currentQuestions.map((q, idx) => (
+                                <div key={q.id} className="p-5 hover:bg-blue-50 transition">
+                                    <div className="flex justify-between">
+                                        <span className="font-bold text-gray-800">{q.text}</span>
+                                        {normalizeId(q.teacherId) === normalizeId(teacher.id) && (
+                                            <div className="flex gap-2">
+                                                <button onClick={()=>handleEditQuestion(q)}><Edit size={16} className="text-blue-500"/></button>
+                                                <button onClick={()=>handleDeleteQuestion(q.id)}><Trash2 size={16} className="text-red-500"/></button>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-2 flex gap-3">
+                                        <span>ID: {q.id}</span>
+                                        <span className="bg-gray-100 px-1 rounded text-gray-500">{GRADE_LABELS[q.grade || ''] || q.grade}</span>
+                                        <span>วิชา: {q.subject}</span>
+                                    </div>
+                                </div>
+                            )) : <div className="p-10 text-center text-gray-400">ไม่พบข้อสอบในหมวดนี้</div>}
+                        </div>
+                        
+                        {/* Pagination */}
+                        {filteredQuestions.length > ITEMS_PER_PAGE && (
+                            <div className="p-4 border-t flex justify-center gap-2">
+                                <button disabled={qBankPage===1} onClick={()=>setQBankPage(p=>p-1)} className="p-2 border rounded hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16}/></button>
+                                <span className="p-2 text-sm text-gray-500">หน้า {qBankPage}</span>
+                                <button disabled={qBankPage * ITEMS_PER_PAGE >= filteredQuestions.length} onClick={()=>setQBankPage(p=>p+1)} className="p-2 border rounded hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16}/></button>
+                            </div>
+                        )}
+                  </div>
                </div>
             )}
             
+            {activeTab === 'profile' && (
+                <div className="max-w-xl mx-auto">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><User className="text-teal-600"/> จัดการข้อมูลส่วนตัว</h3>
+                    <div className="bg-teal-50 p-6 rounded-2xl border border-teal-200 shadow-sm">
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อ-นามสกุล</label>
+                                <input type="text" value={profileName} onChange={e => setProfileName(e.target.value)} className="w-full p-3 border rounded-xl bg-white" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 block mb-1">เปลี่ยนรหัสผ่าน (เว้นว่างถ้าไม่เปลี่ยน)</label>
+                                <input type="password" value={profilePassword} onChange={e => setProfilePassword(e.target.value)} className="w-full p-3 border rounded-xl bg-white mb-2" placeholder="รหัสผ่านใหม่" />
+                                <input type="password" value={profileConfirmPass} onChange={e => setProfileConfirmPass(e.target.value)} className="w-full p-3 border rounded-xl bg-white" placeholder="ยืนยันรหัสผ่านใหม่" />
+                            </div>
+                            <div className="pt-2">
+                                <div className="text-xs text-gray-500 mb-2">
+                                    <div>โรงเรียน: {teacher.school}</div>
+                                    <div>Username: {teacher.username}</div>
+                                    <div>ระดับชั้น: {teacher.gradeLevel || 'ALL'}</div>
+                                </div>
+                                <button onClick={handleUpdateProfile} disabled={isProcessing} className="w-full bg-teal-600 text-white py-3 rounded-xl font-bold shadow hover:bg-teal-700 disabled:opacity-50">
+                                    {isProcessing ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* REGISTRATION MANAGEMENT TAB (Admin Only) */}
+            {activeTab === 'registrations' && isAdmin && (
+                <div className="max-w-4xl mx-auto">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2"><UserCog className="text-red-600"/> ระบบรับสมัครสมาชิก</h3>
+                        <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-full">
+                            <button onClick={handleToggleReg} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${regEnabled ? 'bg-green-500 text-white shadow' : 'text-gray-500'}`}>
+                                เปิดรับสมัคร
+                            </button>
+                            <button onClick={handleToggleReg} className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${!regEnabled ? 'bg-red-500 text-white shadow' : 'text-gray-500'}`}>
+                                ปิดรับสมัคร
+                            </button>
+                        </div>
+                    </div>
+
+                    {pendingRegs.length === 0 ? (
+                        <div className="text-center py-20 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400">
+                            ไม่มีคำขอสมัครสมาชิกใหม่
+                        </div>
+                    ) : (
+                        <div className="grid md:grid-cols-2 gap-4">
+                            {pendingRegs.map(req => (
+                                <div key={req.id} className="bg-white border rounded-xl p-4 shadow-sm hover:shadow-md transition">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                            <div className="font-bold text-lg text-gray-800">{req.name} {req.surname}</div>
+                                            <div className="flex items-center gap-1 text-gray-500 text-xs font-mono bg-gray-100 px-2 py-1 rounded w-fit">
+                                                <CreditCard size={12}/> {req.citizenId}
+                                            </div>
+                                        </div>
+                                        <span className="text-[10px] text-gray-400">{new Date(req.timestamp).toLocaleDateString()}</span>
+                                    </div>
+                                    <div className="flex gap-2 mt-4">
+                                        <button onClick={() => setShowApproveModal(req)} className="flex-1 bg-green-500 text-white py-2 rounded-lg font-bold text-sm hover:bg-green-600">อนุมัติ</button>
+                                        <button onClick={() => handleRejectReg(req.id)} className="flex-1 bg-red-100 text-red-600 py-2 rounded-lg font-bold text-sm hover:bg-red-200">ปฏิเสธ</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* TEACHER MANAGEMENT TAB */}
+            {activeTab === 'teachers' && isAdmin && (
+                <div className="max-w-6xl mx-auto" id="teacher-form">
+                    {!selectedSchoolForView ? (
+                        <div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Building className="text-gray-600"/> จัดการโรงเรียน</h3>
+                            
+                            <div className="mb-6 flex gap-2">
+                                <input type="text" value={newSchoolName} onChange={e=>setNewSchoolName(e.target.value)} placeholder="ชื่อโรงเรียนใหม่..." className="border p-2 rounded-lg flex-1"/>
+                                <button onClick={handleAddSchool} className="bg-blue-600 text-white px-4 rounded-lg font-bold">เพิ่มโรงเรียน</button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {schools.map(s => (
+                                    <div key={s.id} onClick={() => {setSelectedSchoolForView(s.name); setNewTeacherSchool(s.name);}} className="bg-white border rounded-xl p-6 shadow-sm hover:shadow-lg hover:border-blue-300 cursor-pointer transition group relative">
+                                        <div className="flex items-center gap-3 mb-2">
+                                            <div className="bg-blue-100 p-3 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition"><Building size={24}/></div>
+                                            <h4 className="font-bold text-lg text-gray-800">{s.name}</h4>
+                                        </div>
+                                        <p className="text-sm text-gray-500">{allTeachers.filter(t => t.school === s.name).length} คุณครู</p>
+                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteSchool(s.id); }} className="absolute top-4 right-4 text-gray-300 hover:text-red-500"><Trash2 size={16}/></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <div>
+                            <button onClick={() => {setSelectedSchoolForView(null); setNewTeacherSchool('');}} className="mb-4 text-sm font-bold text-blue-600 hover:underline flex items-center gap-1"><ArrowLeft size={16}/> กลับไปหน้ารายชื่อโรงเรียน</button>
+                            
+                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-6 flex items-center gap-3">
+                                <Building className="text-blue-600" size={32}/>
+                                <div>
+                                    <h3 className="text-xl font-bold text-blue-900">{selectedSchoolForView}</h3>
+                                    <p className="text-blue-700 text-sm">จัดการข้อมูลครูในโรงเรียนนี้</p>
+                                </div>
+                            </div>
+
+                            <div className={`p-6 rounded-2xl border mb-8 shadow-sm transition-colors ${editingTeacherId ? 'bg-orange-50 border-orange-100' : 'bg-gray-50 border-gray-200'}`}>
+                                <h4 className={`font-bold mb-4 flex items-center gap-2 ${editingTeacherId ? 'text-orange-800' : 'text-gray-700'}`}>
+                                    {editingTeacherId ? <><Edit size={18}/> แก้ไขข้อมูลครู</> : <><PlusCircle size={18}/> เพิ่มบัญชีครู (ในโรงเรียนนี้)</>}
+                                </h4>
+                                <div className="grid md:grid-cols-2 gap-4 mb-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อ-นามสกุล</label>
+                                        <input type="text" value={newTeacherName} onChange={e => setNewTeacherName(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder="เช่น ครูสมศรี ใจดี" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">Username (สำหรับเข้าสู่ระบบ)</label>
+                                        <input type="text" value={newTeacherUser} onChange={e => setNewTeacherUser(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder="เช่น somsie" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">Password {editingTeacherId && '(เว้นว่างถ้าไม่เปลี่ยน)'}</label>
+                                        <input type="text" value={newTeacherPass} onChange={e => setNewTeacherPass(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder={editingTeacherId ? "เว้นว่างไว้หากไม่เปลี่ยน" : "กำหนดรหัสผ่าน"} />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">ระดับชั้นที่ดูแล</label>
+                                        <select value={newTeacherGrade} onChange={(e) => setNewTeacherGrade(e.target.value)} className="w-full p-2 border rounded-lg bg-white outline-none">
+                                            <option value="ALL">ทุกระดับชั้น (Admin/Director)</option>
+                                            {GRADES.map(g => (
+                                                <option key={g} value={g}>{GRADE_LABELS[g]}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    {editingTeacherId && (
+                                        <button onClick={() => { setEditingTeacherId(null); setNewTeacherName(''); setNewTeacherUser(''); setNewTeacherPass(''); setNewTeacherGrade('ALL'); }} className="px-6 py-2 bg-gray-200 rounded-lg font-bold text-gray-600 hover:bg-gray-300">ยกเลิก</button>
+                                    )}
+                                    <button onClick={handleSaveTeacher} disabled={isProcessing} className={`flex-1 text-white py-2 rounded-lg font-bold shadow transition ${editingTeacherId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-gray-800 hover:bg-black'}`}>
+                                        {isProcessing ? 'กำลังบันทึก...' : (editingTeacherId ? 'บันทึกการแก้ไข' : '+ เพิ่มบัญชีครู')}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-xl border overflow-hidden">
+                                <div className="p-4 bg-gray-100 font-bold text-gray-600 border-b">รายชื่อครู ({allTeachers.filter(t => t.school === selectedSchoolForView).length})</div>
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-50 text-gray-500">
+                                        <tr><th className="p-3">ชื่อ</th><th className="p-3">Username</th><th className="p-3">ชั้น</th><th className="p-3 text-right">จัดการ</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {allTeachers.filter(t => t.school === selectedSchoolForView).map(t => (
+                                            <tr key={t.id} className="border-b last:border-0 hover:bg-gray-50">
+                                                <td className="p-3 font-bold">{t.name} {t.role === 'ADMIN' && <span className="bg-yellow-100 text-yellow-800 text-[10px] px-1 rounded ml-1">ADMIN</span>}</td>
+                                                <td className="p-3 font-mono text-gray-500">{t.username}</td>
+                                                <td className="p-3 text-gray-600">
+                                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${!t.gradeLevel || t.gradeLevel === 'ALL' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                        {(!t.gradeLevel || t.gradeLevel === 'ALL') ? 'ทุกชั้น' : GRADE_LABELS[t.gradeLevel] || t.gradeLevel}
+                                                    </span>
+                                                </td>
+                                                <td className="p-3 text-right">
+                                                    {String(t.id) !== String(teacher.id) && t.role !== 'ADMIN' && (
+                                                        <div className="flex justify-end gap-2">
+                                                            <button onClick={() => handleEditTeacher(t)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit size={16}/></button>
+                                                            <button onClick={() => handleDeleteTeacher(String(t.id))} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* SUBJECT MANAGEMENT TAB */}
+            {activeTab === 'subjects' && (
+                <div className="max-w-3xl mx-auto">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Library className="text-pink-500"/> รายวิชาของฉัน</h3>
+                    <div className="bg-pink-50 p-6 rounded-2xl border border-pink-100 mb-6 shadow-sm">
+                        <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><PlusCircle size={18}/> เพิ่มรายวิชาใหม่</h4>
+                        
+                        <div className="grid md:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อวิชา</label>
+                                <input 
+                                    type="text" 
+                                    value={newSubjectName} 
+                                    onChange={e => setNewSubjectName(e.target.value)} 
+                                    placeholder="เช่น คณิตศาสตร์, สังคมศึกษา" 
+                                    className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-pink-200 outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 block mb-1">ไอคอนประจำวิชา</label>
+                                <div className="relative">
+                                    <select value={newSubjectIcon} onChange={e => setNewSubjectIcon(e.target.value)} className="w-full p-3 border rounded-xl appearance-none bg-white pr-8 outline-none">
+                                        {SUBJECT_ICONS.map(i => <option key={i.name} value={i.name}>{i.name}</option>)}
+                                    </select>
+                                    <div className="absolute right-3 top-3 text-gray-400 pointer-events-none">
+                                        {SUBJECT_ICONS.find(i=>i.name===newSubjectIcon)?.component}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="text-xs font-bold text-gray-500 block mb-2">เลือกสีการ์ด</label>
+                            <div className="flex flex-wrap gap-2">
+                                {CARD_COLORS.map(c => (
+                                    <button 
+                                        key={c.name} 
+                                        onClick={() => setNewSubjectColor(c.class)}
+                                        className={`px-4 py-2 rounded-lg border-2 font-bold text-sm transition-all ${newSubjectColor === c.class ? 'ring-2 ring-pink-400 scale-105 shadow-md ' + c.class : 'bg-white border-gray-200 text-gray-500 opacity-60 hover:opacity-100'}`}
+                                    >
+                                        {c.name}
+                                    </button>
+                                ))}
+                            </div>
+                            {/* Preview */}
+                            <div className={`mt-4 p-4 rounded-xl border-2 flex items-center gap-3 ${newSubjectColor}`}>
+                                <div className="bg-white/50 p-2 rounded-full">
+                                    {SUBJECT_ICONS.find(i=>i.name===newSubjectIcon)?.component}
+                                </div>
+                                <span className="font-bold">{newSubjectName || 'ตัวอย่างชื่อวิชา'}</span>
+                            </div>
+                        </div>
+
+                        <button onClick={handleAddSubject} disabled={!newSubjectName} className="w-full bg-pink-500 text-white py-3 rounded-xl font-bold shadow hover:bg-pink-600 disabled:opacity-50 transition">
+                            บันทึกรายวิชา
+                        </button>
+                    </div>
+
+                    <div className="space-y-3">
+                        <h4 className="font-bold text-gray-700">รายวิชาที่มีอยู่ ({myCreatedSubjects.length})</h4>
+                        {myCreatedSubjects.length === 0 ? (
+                            <div className="text-gray-400 text-center py-10 border-2 border-dashed rounded-xl">ยังไม่ได้สร้างรายวิชา</div>
+                        ) : (
+                            <div className="grid md:grid-cols-2 gap-3">
+                                {myCreatedSubjects.map(s => (
+                                    <div key={s.id} className={`flex items-center justify-between p-4 border rounded-xl hover:shadow-md transition ${s.color}`}>
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-white/60 rounded-full flex items-center justify-center backdrop-blur-sm shadow-sm">
+                                                {SUBJECT_ICONS.find(i => i.name === s.icon)?.component || <Book />}
+                                            </div>
+                                            <span className="font-bold">{s.name}</span>
+                                        </div>
+                                        <button onClick={() => handleDeleteSubject(s.id)} className="bg-white/50 hover:bg-white p-2 rounded-lg text-red-500 transition"><Trash2 size={18}/></button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* OTHER TABS (Students, Stats) */}
             {activeTab === 'students' && (
                 <div className="max-w-4xl mx-auto">
@@ -1683,6 +1501,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                         <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2"><BarChart2 className="text-green-600"/> คะแนนสอบของนักเรียน</h3>
                         <button onClick={loadData} className="flex items-center gap-2 text-sm bg-white border px-3 py-2 rounded-lg hover:bg-gray-50"><RefreshCw size={14}/> รีเฟรชข้อมูล</button>
                     </div>
+                    {students.length === 0 ? (
+                        <div className="text-center py-20 bg-white rounded-3xl border border-gray-100 shadow-sm">
+                            <p className="text-gray-400 text-lg mb-2">ยังไม่มีนักเรียนในระบบ</p>
+                            <button onClick={() => setActiveTab('students')} className="text-blue-600 hover:underline">ไปที่เมนูจัดการนักเรียน เพื่อเพิ่มรายชื่อ</button>
+                        </div>
+                    ) : (
                     <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-green-50 text-green-900 font-bold border-b border-green-100">
@@ -1714,16 +1538,160 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                         </tr>
                                     );
                                 })}
-                                {students.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">ไม่มีข้อมูลนักเรียน</td></tr>}
                             </tbody>
                         </table>
                     </div>
+                    )}
                 </div>
             )}
+
+            {/* O-NET TAB */}
+            {activeTab === 'onet' && isP6OrAdmin && (
+              // ... O-NET Content (No changes here, skipping for brevity but logic is preserved)
+              <div className="max-w-4xl mx-auto">
+                 <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 mb-8 shadow-sm">
+                    <h4 className="font-bold text-indigo-900 mb-4 flex items-center gap-2 text-xl"><Trophy className="text-yellow-500"/> ติวเข้มพิชิต O-NET (ป.6)</h4>
+                    {/* ... O-NET Implementation from previous code ... */}
+                    <div className="space-y-4 animate-fade-in">
+                        <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm">
+                           <div className="grid md:grid-cols-2 gap-4 mb-4">
+                               <div>
+                                   <label className="text-xs font-bold text-gray-500 block mb-1">วิชา (4 วิชาหลัก)</label>
+                                   <select value={assignSubject} onChange={(e) => setAssignSubject(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white text-gray-900 outline-none">
+                                       <option value="">-- เลือกวิชา --</option>
+                                       {ONET_SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                                   </select>
+                               </div>
+                               <div>
+                                   <label className="text-xs font-bold text-gray-500 block mb-1">จำนวนข้อ</label>
+                                   <input type="number" value={assignCount} onChange={(e) => setAssignCount(Number(e.target.value))} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" min="5" max="20" />
+                               </div>
+                               <div>
+                                   <label className="text-xs font-bold text-gray-500 block mb-1">กำหนดส่ง</label>
+                                   <input type="date" value={assignDeadline} onChange={(e) => setAssignDeadline(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" />
+                               </div>
+                               <div>
+                                   <label className="text-xs font-bold text-gray-500 block mb-1">สาระที่ต้องการเน้น (Topic)</label>
+                                   <input type="text" value={assignAiTopic} onChange={(e) => setAssignAiTopic(e.target.value)} placeholder="เช่น พีชคณิต, การอ่านจับใจความ" className="w-full p-2.5 rounded-lg border border-gray-300 bg-white outline-none" />
+                               </div>
+                           </div>
+                           
+                           <div>
+                                <label className="block text-xs font-bold text-gray-500 mb-1">Google Gemini API Key</label>
+                                <div className="flex gap-2">
+                                    <input type="password" value={geminiApiKey} onChange={(e) => { setGeminiApiKey(e.target.value); localStorage.setItem('gemini_api_key', e.target.value); }} className="flex-1 p-2 border rounded-lg text-sm bg-gray-50" placeholder="วาง API Key ที่นี่..." />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end">
+                            <button 
+                                onClick={handleOnetGenerateQuestions}
+                                disabled={isGeneratingAi || !assignSubject || !assignAiTopic}
+                                className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:scale-105 transition disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {isGeneratingAi ? <RefreshCw className="animate-spin"/> : <Sparkles size={18}/>}
+                                สร้างข้อสอบ O-NET ด้วย AI
+                            </button>
+                        </div>
+                        
+                        <div className="text-xs text-center text-indigo-400">
+                             *ระบบจะวิเคราะห์แนวข้อสอบเก่า O-NET ปี 2560-2566 เพื่อสร้างข้อสอบใหม่ที่ใกล้เคียงที่สุด
+                        </div>
+
+                        {newlyGeneratedQuestions.length > 0 && (
+                          <div className="border rounded-xl overflow-hidden bg-white mt-6 shadow-md border-indigo-200">
+                              <div className="bg-indigo-50 p-3 flex justify-between items-center border-b border-indigo-100">
+                                  <span className="font-bold text-indigo-900 text-sm">ตัวอย่างข้อสอบ ({newlyGeneratedQuestions.length} ข้อ)</span>
+                                  <button onClick={() => setNewlyGeneratedQuestions([])} className="text-xs text-red-500 hover:underline">ล้างทั้งหมด</button>
+                              </div>
+                              <div className="max-h-60 overflow-y-auto p-2 space-y-2">
+                                  {newlyGeneratedQuestions.map((q, i) => (
+                                      <div key={i} className="p-3 border rounded-lg bg-gray-50 text-sm relative group">
+                                          <div className="font-bold text-gray-800 pr-6">{i+1}. {q.text}</div>
+                                          <div className="text-gray-500 text-xs mt-1">ตอบ: {q.correct} | {q.explanation}</div>
+                                          <button onClick={() => setNewlyGeneratedQuestions(prev => prev.filter((_, idx) => idx !== i))} className="absolute top-2 right-2 text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
+                                      </div>
+                                  ))}
+                              </div>
+                              <div className="p-4 border-t bg-gray-50">
+                                  <div className="flex gap-2 mb-4">
+                                      <button 
+                                          onClick={handleOnetGenerateQuestions}
+                                          disabled={isGeneratingAi}
+                                          className="flex-1 py-2 bg-indigo-100 text-indigo-600 rounded-lg font-bold text-sm hover:bg-indigo-200 flex items-center justify-center gap-2"
+                                      >
+                                          {isGeneratingAi ? <RefreshCw size={14} className="animate-spin"/> : <PlusCircle size={14}/>} เพิ่มข้อสอบอีก
+                                      </button>
+                                  </div>
+
+                                  <div className="mb-2">
+                                     <label className="text-xs font-bold text-gray-500">ชื่อการบ้าน (ตั้งชื่ออัตโนมัติ)</label>
+                                     <input 
+                                       type="text" 
+                                       value={assignTitle || `[O-NET] ฝึกฝน${assignSubject} เรื่อง ${assignAiTopic}`} 
+                                       onChange={e => setAssignTitle(e.target.value)} 
+                                       className="w-full p-2 border rounded-lg bg-white"
+                                     />
+                                  </div>
+                                  <button 
+                                      onClick={handleFinalizeAssignment}
+                                      disabled={isProcessing}
+                                      className="w-full bg-green-500 text-white py-3 rounded-xl font-bold shadow hover:bg-green-600 disabled:opacity-50 flex justify-center items-center gap-2"
+                                  >
+                                      {isProcessing ? 'กำลังบันทึก...' : <><Save size={20}/> บันทึกเป็นการบ้าน</>}
+                                  </button>
+                              </div>
+                          </div>
+                        )}
+                    </div>
+                 </div>
+
+                 <div className="mt-8">
+                     <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <List size={20}/> รายการติว O-NET ({filteredOnetAssignments.length})
+                        </h3>
+                        <div className="flex bg-gray-100 p-1 rounded-lg">
+                            <button onClick={() => setOnetSubjectFilter('ALL')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${onetSubjectFilter === 'ALL' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>ทั้งหมด</button>
+                            {ONET_SUBJECTS.map(subj => (
+                                <button key={subj} onClick={() => setOnetSubjectFilter(subj)} className={`px-3 py-1 rounded-md text-xs font-bold transition ${onetSubjectFilter === subj ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>{subj}</button>
+                            ))}
+                        </div>
+                     </div>
+
+                     {filteredOnetAssignments.length === 0 ? (
+                         <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-xl bg-gray-50">
+                             {onetSubjectFilter === 'ALL' ? 'ยังไม่ได้สร้างรายการติว O-NET' : `ไม่พบรายการติววิชา${onetSubjectFilter}`}
+                         </div>
+                     ) : (
+                         <div className="space-y-3">
+                             {filteredOnetAssignments.slice().reverse().map(a => (
+                                 <div key={a.id} className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center hover:shadow-md transition">
+                                     <div className="mb-2 md:mb-0">
+                                         <div className="font-bold text-indigo-900 text-lg">{a.title}</div>
+                                         <div className="text-sm text-gray-500 flex gap-4">
+                                             <span className="bg-indigo-50 text-indigo-600 px-2 rounded text-xs font-bold flex items-center">{a.subject}</span>
+                                             <span>{a.questionCount} ข้อ</span>
+                                             <span>กำหนดส่ง: {formatDate(a.deadline)}</span>
+                                         </div>
+                                     </div>
+                                     <div className="flex items-center gap-2">
+                                          <button onClick={() => handleViewAssignment(a)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-100">ดูรายละเอียด</button>
+                                          <button onClick={() => handleDeleteAssignment(a.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100"><Trash2 size={16}/></button>
+                                     </div>
+                                 </div>
+                             ))}
+                         </div>
+                     )}
+                 </div>
+              </div>
+            )}
+            
         </div>
       )}
       
-      {/* Modal for viewing assignment details */}
+      {/* ... [Modals] ... */}
       {selectedAssignment && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col animate-fade-in overflow-hidden">

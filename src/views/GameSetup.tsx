@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Question, Teacher, SubjectConfig } from '../types';
 import { ArrowLeft, Play, Layers, Shuffle, GraduationCap } from 'lucide-react';
@@ -64,20 +65,21 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
         return;
     }
 
+    // ✅ Strict Sanitization to prevent Firebase "undefined" error
     const sanitizedQuestions = finalQuestions.map((q, idx) => ({
         id: String(q.id || `q${idx}`),
-        subject: q.subject || 'GENERAL',
-        text: q.text || '',
-        image: q.image || '',
-        choices: q.choices.map((c, cIdx) => ({
-            id: String(c.id).trim() || `c${cIdx}`,
-            text: c.text || '',
-            image: c.image || '' // Fix: Ensure undefined becomes empty string
+        subject: q.subject ? String(q.subject) : 'GENERAL',
+        text: q.text ? String(q.text) : '',
+        image: q.image ? String(q.image) : '',
+        choices: (Array.isArray(q.choices) ? q.choices : []).map((c, cIdx) => ({
+            id: c.id ? String(c.id).trim() : `c${cIdx}`,
+            text: c.text ? String(c.text) : '',
+            image: c.image ? String(c.image) : '' // Force empty string if undefined/null
         })),
-        correctChoiceId: String(q.correctChoiceId).trim(),
-        explanation: q.explanation || '',
-        grade: q.grade || 'ALL',
-        school: q.school || 'CENTER'
+        correctChoiceId: q.correctChoiceId ? String(q.correctChoiceId).trim() : '',
+        explanation: q.explanation ? String(q.explanation) : '',
+        grade: q.grade ? String(q.grade) : 'ALL',
+        school: q.school ? String(q.school) : 'CENTER'
     }));
 
     try {
@@ -100,7 +102,8 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
         
         onGameCreated(roomCode); 
     } catch (e) {
-        alert("Firebase Error: " + e);
+        console.error("Firebase Error:", e);
+        alert("เกิดข้อผิดพลาดในการสร้างห้อง: " + e);
     } finally {
         setLoading(false);
     }

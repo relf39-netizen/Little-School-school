@@ -30,8 +30,11 @@ const Layout: React.FC<LayoutProps> = ({
             <div className="bg-indigo-600 text-white p-2 rounded-lg shadow-sm">
               <School size={24} />
             </div>
-            <h1 className="text-xl font-bold text-indigo-900 hidden md:block">LittleSchool LearnUp</h1>
-            <h1 className="text-xl font-bold text-indigo-900 md:hidden">LittleSchool</h1>
+            <div>
+                <h1 className="text-xl font-bold text-indigo-900 leading-tight hidden md:block">LittleSchool LearnUp</h1>
+                <h1 className="text-xl font-bold text-indigo-900 leading-tight md:hidden">LittleSchool</h1>
+                <p className="text-[10px] text-indigo-500 font-medium">เรียนสนุก ฉลาดขึ้นทุกวัน</p>
+            </div>
           </div>
 
           {studentName && (

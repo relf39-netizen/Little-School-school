@@ -1,7 +1,7 @@
 
 // services/api.ts
 
-import { Student, Question, Teacher, Subject, ExamResult, Assignment, SubjectConfig } from '../types'; 
+import { Student, Question, Teacher, Subject, ExamResult, Assignment, SubjectConfig, School, RegistrationRequest } from '../types'; 
 import { MOCK_STUDENTS, MOCK_QUESTIONS } from '../constants';
 import { db, firebase } from './firebaseConfig'; // Import Firebase DB
 
@@ -23,6 +23,9 @@ const snapshotToArray = <T>(snapshot: any): T[] => {
   });
   return returnArr;
 };
+
+// Helper: Clean String (Remove Trailing Spaces)
+const cleanString = (str?: string) => str ? String(str).trim() : '';
 
 // 🔄 ฟังก์ชันช่วยแปลงรหัสวิชา (ถ้าจำเป็น)
 const normalizeSubject = (rawSubject: string): Subject => {
@@ -53,17 +56,63 @@ const seedDatabase = async () => {
             grade: q.grade || 'P6'
         });
     }
-
-    // 3. Seed Default Subjects (Optional)
-    const defaultSubjects = [
-        { name: 'คณิตศาสตร์', icon: 'Calculator', color: 'bg-red-50 hover:bg-red-100 border-red-200 text-red-600', grade: 'ALL' },
-        { name: 'วิทยาศาสตร์', icon: 'FlaskConical', color: 'bg-green-50 hover:bg-green-100 border-green-200 text-green-600', grade: 'ALL' },
-        { name: 'ภาษาไทย', icon: 'Book', color: 'bg-yellow-50 hover:bg-yellow-100 border-yellow-200 text-yellow-600', grade: 'ALL' },
-        { name: 'ภาษาอังกฤษ', icon: 'Languages', color: 'bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-600', grade: 'ALL' }
-    ];
-    // Seed subjects for "System" or default school
-    // Note: In a real scenario, we might want to attach this to a specific school
 };
+
+// ---------------------------------------------------------------------------
+// 🟢 SCHOOL MANAGEMENT (FIREBASE)
+// ---------------------------------------------------------------------------
+
+export const getSchools = async (): Promise<School[]> => {
+  try {
+    // 1. Get explicit schools
+    const snapshot = await db.ref('schools').once('value');
+    const schools = snapshotToArray<School>(snapshot);
+
+    // 2. Get distinct schools from Teachers (Legacy support)
+    const teachersSnap = await db.ref('teachers').once('value');
+    const teachers = snapshotToArray<Teacher>(teachersSnap);
+    
+    const existingSchoolNames = new Set(schools.map(s => s.name));
+    
+    teachers.forEach(t => {
+        const sName = cleanString(t.school);
+        if (sName && sName !== 'System' && !existingSchoolNames.has(sName)) {
+            schools.push({ id: `legacy_${sName}`, name: sName });
+            existingSchoolNames.add(sName);
+        }
+    });
+
+    return schools;
+  } catch (e) {
+    console.error("Error fetching schools", e);
+    return [];
+  }
+};
+
+export const manageSchool = async (data: { action: 'add' | 'delete', name?: string, id?: string }): Promise<boolean> => {
+  try {
+    if (data.action === 'add' && data.name) {
+      const cleanName = cleanString(data.name);
+      // Check duplicate
+      const existing = await db.ref('schools').orderByChild('name').equalTo(cleanName).once('value');
+      if (existing.exists()) return false;
+
+      const newRef = db.ref('schools').push();
+      await newRef.set({ id: newRef.key, name: cleanName });
+      return true;
+    } else if (data.action === 'delete' && data.id) {
+      if (!data.id.startsWith('legacy_')) {
+          await db.ref(`schools/${data.id}`).remove();
+      }
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error("Manage school error", e);
+    return false;
+  }
+};
+
 
 // ---------------------------------------------------------------------------
 // 🟢 SUBJECT MANAGEMENT (FIREBASE)
@@ -71,12 +120,12 @@ const seedDatabase = async () => {
 
 export const getSubjects = async (school: string): Promise<SubjectConfig[]> => {
   try {
-    const snapshot = await db.ref(`subjects/${school}`).once('value');
+    const cleanSchool = cleanString(school);
+    const snapshot = await db.ref(`subjects/${cleanSchool}`).once('value');
     if (snapshot.exists()) {
         const data = snapshot.val();
         return Object.keys(data).map(key => ({ ...data[key], id: key }));
     }
-    // Fallback: If no subjects, return default list visually (but don't save unless added)
     return [];
   } catch (e) {
     console.error("Error fetching subjects", e);
@@ -86,7 +135,8 @@ export const getSubjects = async (school: string): Promise<SubjectConfig[]> => {
 
 export const addSubject = async (school: string, subject: SubjectConfig): Promise<boolean> => {
   try {
-    const newRef = db.ref(`subjects/${school}`).push();
+    const cleanSchool = cleanString(school);
+    const newRef = db.ref(`subjects/${cleanSchool}`).push();
     await newRef.set({ ...subject, id: newRef.key });
     return true;
   } catch (e) {
@@ -97,7 +147,8 @@ export const addSubject = async (school: string, subject: SubjectConfig): Promis
 
 export const deleteSubject = async (school: string, subjectId: string): Promise<boolean> => {
   try {
-    await db.ref(`subjects/${school}/${subjectId}`).remove();
+    const cleanSchool = cleanString(school);
+    await db.ref(`subjects/${cleanSchool}/${subjectId}`).remove();
     return true;
   } catch (e) {
     console.error("Error deleting subject", e);
@@ -125,7 +176,6 @@ export const teacherLogin = async (username: string, password: string): Promise<
       }
     } else {
         // 2. 🚨 SPECIAL FALLBACK: If 'admin' doesn't exist, CREATE IT automatically
-        // This solves the "No Data" problem for the first login.
         if (username === 'admin' && password === '1234') {
              const newAdmin: Teacher = {
                  id: 'admin_root',
@@ -168,6 +218,7 @@ export const manageTeacher = async (data: {
     gradeLevel?: string 
 }): Promise<{success: boolean, message?: string}> => {
     try {
+        const cleanSchool = cleanString(data.school);
         if (data.action === 'add') {
              const newRef = db.ref('teachers').push();
              await newRef.set({
@@ -175,7 +226,7 @@ export const manageTeacher = async (data: {
                  name: data.name,
                  username: data.username,
                  password: data.password,
-                 school: data.school,
+                 school: cleanSchool,
                  role: data.role,
                  gradeLevel: data.gradeLevel
              });
@@ -183,7 +234,7 @@ export const manageTeacher = async (data: {
              const updateData: any = {};
              if (data.name) updateData.name = data.name;
              if (data.password) updateData.password = data.password;
-             if (data.school) updateData.school = data.school;
+             if (data.school) updateData.school = cleanSchool;
              if (data.gradeLevel) updateData.gradeLevel = data.gradeLevel;
              await db.ref(`teachers/${data.id}`).update(updateData);
         } else if (data.action === 'delete' && data.id) {
@@ -196,45 +247,119 @@ export const manageTeacher = async (data: {
 };
 
 // ---------------------------------------------------------------------------
+// 🟢 REGISTRATION SYSTEM (NEW)
+// ---------------------------------------------------------------------------
+
+export const getRegistrationStatus = async (): Promise<boolean> => {
+    try {
+        const snap = await db.ref('system_settings/registration_enabled').once('value');
+        return snap.val() === true;
+    } catch (e) { return false; }
+};
+
+export const toggleRegistrationStatus = async (enabled: boolean): Promise<boolean> => {
+    try {
+        await db.ref('system_settings/registration_enabled').set(enabled);
+        return true;
+    } catch (e) { return false; }
+};
+
+export const requestRegistration = async (citizenId: string, name: string, surname: string): Promise<{success: boolean, message: string}> => {
+    try {
+        const isEnabled = await getRegistrationStatus();
+        if (!isEnabled) return { success: false, message: 'ระบบปิดรับสมัครสมาชิกชั่วคราว' };
+
+        // Check if Teacher already exists
+        const teacherSnap = await db.ref('teachers').orderByChild('username').equalTo(citizenId).once('value');
+        if (teacherSnap.exists()) return { success: false, message: 'เลขบัตรประชาชนนี้มีในระบบแล้ว' };
+
+        // Check pending
+        const pendingSnap = await db.ref('pending_registrations').orderByChild('citizenId').equalTo(citizenId).once('value');
+        if (pendingSnap.exists()) return { success: false, message: 'คุณได้ส่งคำขอไปแล้ว รอการอนุมัติ' };
+
+        const newRef = db.ref('pending_registrations').push();
+        await newRef.set({
+            id: newRef.key,
+            citizenId,
+            name,
+            surname,
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+
+        return { success: true, message: 'ส่งคำขอสำเร็จ รอผู้ดูแลระบบอนุมัติ' };
+    } catch (e) { return { success: false, message: 'เกิดข้อผิดพลาด' }; }
+};
+
+export const getPendingRegistrations = async (): Promise<RegistrationRequest[]> => {
+    try {
+        const snapshot = await db.ref('pending_registrations').once('value');
+        return snapshotToArray<RegistrationRequest>(snapshot);
+    } catch (e) { return []; }
+};
+
+export const approveRegistration = async (req: RegistrationRequest, schoolName: string): Promise<boolean> => {
+    try {
+        const cleanSchool = cleanString(schoolName);
+        
+        // 1. Create Teacher (Auto password: '123456')
+        const newRef = db.ref('teachers').push();
+        await newRef.set({
+            id: newRef.key,
+            name: `${req.name} ${req.surname}`,
+            username: req.citizenId, // Username is Citizen ID
+            password: '123456', // Auto password
+            school: cleanSchool,
+            role: 'TEACHER',
+            gradeLevel: 'ALL',
+            citizenId: req.citizenId
+        });
+
+        // 2. Remove from pending
+        await db.ref(`pending_registrations/${req.id}`).remove();
+        
+        // 3. Ensure school exists in schools list if not legacy
+        await manageSchool({ action: 'add', name: cleanSchool });
+
+        return true;
+    } catch (e) { return false; }
+};
+
+export const rejectRegistration = async (reqId: string): Promise<boolean> => {
+    try {
+        await db.ref(`pending_registrations/${reqId}`).remove();
+        return true;
+    } catch (e) { return false; }
+};
+
+// ---------------------------------------------------------------------------
 // 🟢 STUDENT MANAGEMENT (FIREBASE)
 // ---------------------------------------------------------------------------
 
 export const manageStudent = async (data: { action: 'add' | 'edit' | 'delete', id?: string, name?: string, school?: string, avatar?: string, grade?: string, teacherId?: string }): Promise<{success: boolean, student?: Student, message?: string}> => {
   try {
+    const cleanSchool = cleanString(data.school);
     if (data.action === 'add') {
-         // สร้าง ID 5 หลักแบบสุ่ม (เช็คซ้ำง่ายๆ)
          let newId = Math.floor(10000 + Math.random() * 90000).toString();
-         
          await db.ref(`students/${newId}`).set({
              id: newId,
              name: data.name,
-             school: data.school,
+             school: cleanSchool,
              avatar: data.avatar,
              grade: data.grade,
              teacherId: data.teacherId,
              stars: 0
          });
-         
          const newStudent: Student = { 
-             id: newId, 
-             name: data.name!, 
-             school: data.school, 
-             avatar: data.avatar!, 
-             stars: 0, 
-             grade: data.grade, 
-             teacherId: data.teacherId 
+             id: newId, name: data.name!, school: cleanSchool, avatar: data.avatar!, stars: 0, grade: data.grade, teacherId: data.teacherId 
          };
          return { success: true, student: newStudent };
-
     } else if (data.action === 'edit' && data.id) {
          const updateData: any = {};
          if (data.name) updateData.name = data.name;
          if (data.avatar) updateData.avatar = data.avatar;
          if (data.grade) updateData.grade = data.grade;
-         
          await db.ref(`students/${data.id}`).update(updateData);
          return { success: true };
-
     } else if (data.action === 'delete' && data.id) {
          await db.ref(`students/${data.id}`).remove();
          return { success: true };
@@ -257,19 +382,36 @@ export const addStudent = async (name: string, school: string, avatar: string, g
 
 export const getTeacherDashboard = async (school: string) => {
   try {
+    const cleanSchool = cleanString(school);
     const [studentsSnap, resultsSnap, assignmentsSnap, questionsSnap] = await Promise.all([
-        db.ref('students').orderByChild('school').equalTo(school).once('value'),
-        db.ref('results').orderByChild('school').equalTo(school).once('value'),
-        db.ref('assignments').orderByChild('school').equalTo(school).once('value'),
+        db.ref('students').orderByChild('school').equalTo(cleanSchool).once('value'),
+        db.ref('results').orderByChild('school').equalTo(cleanSchool).once('value'),
+        db.ref('assignments').orderByChild('school').equalTo(cleanSchool).once('value'),
         db.ref('questions').once('value') 
     ]);
 
     const students = snapshotToArray<Student>(studentsSnap);
     const results = snapshotToArray<ExamResult>(resultsSnap);
     const assignments = snapshotToArray<Assignment>(assignmentsSnap);
-    const questions = snapshotToArray<Question>(questionsSnap);
+    
+    // ✅ Use robust helper for questions array
+    const questionsRaw = questionsSnap.val();
+    const questions: Question[] = [];
+    if (questionsRaw) {
+        Object.keys(questionsRaw).forEach(k => {
+            const q = questionsRaw[k];
+            // Ensure choices is array
+            let choices = q.choices;
+            if (choices && typeof choices === 'object' && !Array.isArray(choices)) {
+                choices = Object.values(choices);
+            }
+            if (!Array.isArray(choices)) choices = [];
+            
+            questions.push({ ...q, id: k, choices });
+        });
+    }
 
-    const filteredQuestions = questions.filter(q => q.school === school || q.school === 'CENTER' || q.school === 'Admin');
+    const filteredQuestions = questions.filter(q => q.school === cleanSchool || q.school === 'CENTER' || q.school === 'Admin');
 
     return { 
         students: students, 
@@ -293,6 +435,7 @@ export const addQuestion = async (question: any): Promise<boolean> => {
     await newRef.set({
       ...question,
       id: newRef.key,
+      school: cleanString(question.school),
       choices: [
           { id: '1', text: question.c1 },
           { id: '2', text: question.c2 },
@@ -316,6 +459,7 @@ export const editQuestion = async (question: any): Promise<boolean> => {
         grade: question.grade,
         text: question.text,
         image: question.image || '',
+        school: cleanString(question.school),
         choices: [
             { id: '1', text: question.c1 },
             { id: '2', text: question.c2 },
@@ -349,7 +493,7 @@ export const addAssignment = async (school: string, subject: string, grade: stri
     const newRef = db.ref('assignments').push();
     await newRef.set({
         id: newRef.key,
-        school,
+        school: cleanString(school),
         subject,
         grade,
         questionCount,
@@ -383,7 +527,7 @@ export const saveScore = async (studentId: string, studentName: string, school: 
         id: newRef.key,
         studentId,
         studentName,
-        school,
+        school: cleanString(school),
         score,
         totalQuestions: total,
         subject,
@@ -391,7 +535,6 @@ export const saveScore = async (studentId: string, studentName: string, school: 
         timestamp: firebase.database.ServerValue.TIMESTAMP
     });
     
-    // Update Student Stars
     const studentRef = db.ref(`students/${studentId}`);
     studentRef.child('stars').transaction((currentStars) => {
         return (currentStars || 0) + score;
@@ -413,10 +556,8 @@ export const fetchAppData = async (): Promise<AppData> => {
     const snapshot = await db.ref('/').once('value');
     let data = snapshot.val();
 
-    // 🌟 AUTO-SEED: If database is empty, seed mock data
     if (!data || (!data.students && !data.questions)) {
         await seedDatabase();
-        // Fetch again after seeding
         const newSnap = await db.ref('/').once('value');
         data = newSnap.val();
     }
@@ -427,9 +568,26 @@ export const fetchAppData = async (): Promise<AppData> => {
         ? Object.keys(data.students).map(k => ({...data.students[k], id: k})) 
         : [];
         
-    const questionsArr: Question[] = data.questions 
-        ? Object.keys(data.questions).map(k => ({...data.questions[k], id: k})) 
-        : [];
+    // ✅ ROBUST QUESTION PARSING
+    const questionsArr: Question[] = [];
+    if (data.questions) {
+        Object.keys(data.questions).forEach(k => {
+            const q = data.questions[k];
+            // Normalize choices
+            let choices = q.choices;
+            if (choices && typeof choices === 'object' && !Array.isArray(choices)) {
+                choices = Object.values(choices);
+            }
+            if (!Array.isArray(choices)) choices = [];
+            
+            questionsArr.push({
+                ...q,
+                id: k,
+                choices: choices,
+                image: q.image || '', // Ensure no undefined props
+            });
+        });
+    }
 
     const resultsArr: ExamResult[] = data.results 
         ? Object.keys(data.results).map(k => ({...data.results[k], id: k})) 

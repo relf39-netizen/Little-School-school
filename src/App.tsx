@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import Login from './views/Login';
@@ -77,15 +76,18 @@ const App: React.FC = () => {
     return () => { isMounted = false; };
   }, []);
 
+  const fetchStudentSubjects = async (schoolName: string) => {
+      try {
+        const schoolSubjects = await getSubjects(schoolName || 'โรงเรียนคุณภาพ');
+        setSubjects(schoolSubjects);
+      } catch (e) {
+        console.error("Failed to load subjects", e);
+      }
+  };
+
   const handleLogin = async (student: Student) => { 
     setCurrentUser(student); 
-    // ✅ Fetch subjects for this student's school upon login
-    try {
-      const schoolSubjects = await getSubjects(student.school || 'โรงเรียนคุณภาพ');
-      setSubjects(schoolSubjects);
-    } catch (e) {
-      console.error("Failed to load subjects", e);
-    }
+    await fetchStudentSubjects(student.school || 'โรงเรียนคุณภาพ');
     setCurrentPage('dashboard'); 
   };
 
@@ -195,6 +197,7 @@ const App: React.FC = () => {
               onNavigate={setCurrentPage} 
               onStartAssignment={handleStartAssignment}
               onSelectSubject={handleSelectSubject} 
+              onRefreshSubjects={() => fetchStudentSubjects(currentUser!.school || 'โรงเรียนคุณภาพ')}
             />;
           case 'select-subject': return <SubjectSelection onSelectSubject={handleSelectSubject} onBack={() => setCurrentPage('dashboard')} />;
           case 'practice':

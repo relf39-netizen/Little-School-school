@@ -17,6 +17,13 @@ export interface Teacher {
   school: string;
   role?: string; // ADMIN or TEACHER
   gradeLevel?: string; 
+  citizenId?: string; // New field for identification
+}
+
+// ✅ New Interface for School Management
+export interface School {
+  id: string;
+  name: string;
 }
 
 // ✅ Changed from Enum to string to support dynamic subjects
@@ -69,6 +76,14 @@ export interface Assignment {
   deadline: string; 
   createdBy: string;
   title?: string; // ✅ ชื่อหัวข้อการบ้าน
+}
+
+export interface RegistrationRequest {
+  id: string;
+  citizenId: string;
+  name: string;
+  surname: string;
+  timestamp: number;
 }
 
 export type GameState = 'LOBBY' | 'COUNTDOWN' | 'QUESTION' | 'LEADERBOARD' | 'FINISHED';
