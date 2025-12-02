@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Teacher, Student, Subject, Assignment, Question, SubjectConfig, School, RegistrationRequest } from '../types';
 import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, Users, GraduationCap, Trash2, Edit, Shield, UserCog, KeyRound, Sparkles, Wand2, Key, HelpCircle, ChevronDown, ChevronUp, Layers, Clock, Library, Palette, Type, AlertCircle, ArrowRight, BrainCircuit, List, CheckSquare, Trophy, Lock, User, Activity, Building, CreditCard, Check, ToggleLeft, ToggleRight } from 'lucide-react';
@@ -115,9 +114,19 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
   // O-NET View State
   const [onetSubjectFilter, setOnetSubjectFilter] = useState<string>('ALL');
+  
+  // ✅ P-Chat (O-NET) Auto Select Grade Logic
+  // If teacher has a specific grade (e.g., P3), set it automatically.
+  // If teacher is ALL (Admin), start with null to show selection screen.
+  const initialOnetLevel = (!teacher.gradeLevel || teacher.gradeLevel === 'ALL') ? null : teacher.gradeLevel;
+  const [onetLevel, setOnetLevel] = useState<string | null>(initialOnetLevel); 
 
-  const GRADES = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
-  const GRADE_LABELS: Record<string, string> = { 'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3', 'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6', 'ALL': 'ทุกชั้น' };
+  // ✅ Updated GRADES constant to include M1-M3
+  const GRADES = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'M1', 'M2', 'M3'];
+  const GRADE_LABELS: Record<string, string> = { 
+      'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3', 'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6', 
+      'M1': 'ม.1', 'M2': 'ม.2', 'M3': 'ม.3', 'ALL': 'ทุกชั้น' 
+  };
   
   const ONET_SUBJECTS = ['คณิตศาสตร์', 'ภาษาไทย', 'วิทยาศาสตร์', 'ภาษาอังกฤษ'];
 
@@ -158,6 +167,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
       if (!canManageAll && teacher.gradeLevel) {
           setAssignGrade(teacher.gradeLevel);
           setQGrade(teacher.gradeLevel);
+          // ✅ Update O-NET level if teacher is not ALL
+          setOnetLevel(teacher.gradeLevel);
       }
   }, [teacher]);
 
@@ -183,9 +194,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         setPendingRegs(pending);
     }
     
+    // ✅ Relaxed Subject Filtering: Show all subjects for school/grade, don't strictly filter by teacherId initially to prevent missing data
     const filteredSubjects = subs.filter(s => {
+        // If Admin/Director (ALL), see everything for school
         if (canManageAll) return true;
-        return s.teacherId === normalizeId(teacher.id) || s.grade === teacher.gradeLevel;
+        // If Class Teacher, see subjects for that grade OR subjects they created
+        return s.grade === teacher.gradeLevel || s.teacherId === normalizeId(teacher.id) || s.grade === 'ALL';
     });
 
     setAvailableSubjects(filteredSubjects);
@@ -195,9 +209,17 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         setQSubject(filteredSubjects[0].name);
     }
 
+    // ✅ FIXED: Relax filtering logic to find students even with whitespace mismatch
     const myStudents = (data.students || []).filter((s: Student) => {
-        if (s.school !== teacher.school) return false;
+        const sSchool = String(s.school || '').trim();
+        const tSchool = String(teacher.school || '').trim();
+        
+        // Basic School Match
+        if (sSchool !== tSchool) return false;
+        
+        // Grade Match (only if teacher is not ALL)
         if (!canManageAll && s.grade !== teacher.gradeLevel) return false;
+        
         return true; 
     });
     
@@ -219,7 +241,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         const sum = studentResults.reduce((acc, curr) => {
             const totalQ = Number(curr.totalQuestions);
             const score = Number(curr.score) || 0;
-            // Guard against division by zero or NaN
             if (totalQ > 0) {
                 return acc + ((score / totalQ) * 100);
             }
@@ -228,7 +249,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         average = Math.round(sum / attempts);
     }
     
-    // Prevent NaN
     return { attempts, average: (isNaN(average) || !isFinite(average)) ? 0 : average };
   };
 
@@ -526,9 +546,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const handleOnetGenerateQuestions = async () => {
       if (!geminiApiKey) return alert("กรุณาใส่ API Key");
       if (!assignAiTopic) return alert("กรุณาระบุสาระที่ต้องการเน้น");
+      // ✅ Use selected O-NET Level (if null, fallback P6)
+      const gradeToGen = onetLevel || 'P6';
+      
       setIsGeneratingAi(true);
       try {
-          const generated = await generateQuestionWithAI(assignSubject, 'P6', assignAiTopic, geminiApiKey, 5, 'onet');
+          const generated = await generateQuestionWithAI(assignSubject, gradeToGen, assignAiTopic, geminiApiKey, 5, 'onet');
           if (generated) setNewlyGeneratedQuestions(prev => [...prev, ...generated]);
       } catch (e) { handleAiError(e); } finally { setIsGeneratingAi(false); }
   };
@@ -545,7 +568,21 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         }
     }
     setProcessingMessage('กำลังสร้างการบ้าน...');
-    const finalTitle = assignTitle || `การบ้าน ${assignSubject}`;
+    
+    // ✅ Logic: Handle Title with O-NET Prefix
+    let finalTitle = assignTitle;
+    if (activeTab === 'onet') {
+        if (!finalTitle) {
+            finalTitle = `[O-NET] ฝึกฝน${assignSubject} เรื่อง ${assignAiTopic || 'ทั่วไป'}`;
+        } else if (!finalTitle.startsWith('[O-NET]')) {
+            finalTitle = `[O-NET] ${finalTitle}`;
+        }
+    } else {
+        if (!finalTitle) {
+            finalTitle = `การบ้าน ${assignSubject}`;
+        }
+    }
+
     const success = await addAssignment(teacher.school, assignSubject, assignGrade, assignCount, assignDeadline, teacher.name, finalTitle);
     setIsProcessing(false);
     if (success) { 
@@ -631,13 +668,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
       let result = questions;
 
       // 1. Filter by Owner (if enabled)
-      // If showMyQuestionsOnly is true, we strictly filter by teacherId.
       if (showMyQuestionsOnly) {
           if (!currentTid) result = [];
           else result = result.filter(q => normalizeId(q.teacherId) === currentTid);
-      } else {
-          // If not strict "My Questions", we show what was fetched (school + center + admin)
-          // The fetch logic in API already handles this filtering.
       }
 
       // 2. Filter by Subject (if selected)
@@ -650,7 +683,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   
   const filteredQuestions = getFilteredQuestions();
   const currentQuestions = filteredQuestions.slice((qBankPage - 1) * ITEMS_PER_PAGE, qBankPage * ITEMS_PER_PAGE);
-  const myCreatedSubjects = availableSubjects.filter(s => s.teacherId === normalizeId(teacher.id));
+  const displayedSubjects = availableSubjects; 
 
   const countSubmitted = (assignmentId: string) => {
       const submittedStudentIds = new Set(stats.filter(r => r.assignmentId === assignmentId).map(r => r.studentId));
@@ -665,7 +698,19 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
   const onetAssignments = assignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
   const normalAssignments = assignments.filter(a => !a.title || !a.title.startsWith('[O-NET]'));
-  const filteredOnetAssignments = onetSubjectFilter === 'ALL' ? onetAssignments : onetAssignments.filter(a => a.subject === onetSubjectFilter);
+  
+  // ✅ Filter O-NET assignments by Selected Level (if active)
+  let filteredOnetAssignments = onetAssignments;
+  
+  // Filter by Subject
+  if (onetSubjectFilter !== 'ALL') {
+      filteredOnetAssignments = filteredOnetAssignments.filter(a => a.subject === onetSubjectFilter);
+  }
+  
+  // Filter by Grade Level (if selected)
+  if (onetLevel) {
+      filteredOnetAssignments = filteredOnetAssignments.filter(a => a.grade === onetLevel);
+  }
 
   return (
     <div className="max-w-6xl mx-auto pb-20 relative">
@@ -702,7 +747,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
           </div>
       )}
 
-      {/* AI Generator Modal ... (Same as before) */}
+      {/* AI Generator Modal */}
       {showAiModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -801,16 +846,14 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 onClick={() => { setActiveTab('profile'); setProfileName(teacher.name); setProfilePassword(''); setProfileConfirmPass(''); }} 
             />
 
-            {/* O-NET Tutor Card: Only visible to P6 Teachers or Admin */}
-            {isP6OrAdmin && (
-              <MenuCard 
+            {/* ✅ P-Chat (O-NET) Button: Visible to all, filters by grade */}
+            <MenuCard 
                 icon={<Trophy size={40} />} 
-                title="พิชิต O-NET" 
+                title={onetLevel ? `พิชิต O-NET ${GRADE_LABELS[onetLevel]}` : "พิชิต O-NET"} 
                 desc="สร้างข้อสอบติวเข้ม O-NET ด้วย AI" 
                 color="bg-indigo-50 text-indigo-600 border-indigo-200 shadow-indigo-100" 
                 onClick={() => { setActiveTab('onet'); setAssignStep(1); setNewlyGeneratedQuestions([]); }} 
-              />
-            )}
+            />
 
             {/* Admin Only Card */}
             {isAdmin && (
@@ -838,17 +881,192 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         <div className="bg-white rounded-3xl shadow-sm p-4 md:p-6 min-h-[400px] relative animate-fade-in">
             <button onClick={() => { setActiveTab('menu'); setEditingStudentId(null); setCreatedStudent(null); setSelectedStudentForStats(null); }} className="mb-6 flex items-center gap-2 text-gray-500 hover:text-purple-600 font-bold transition-colors"><div className="bg-gray-100 p-2 rounded-full"><ArrowLeft size={20} /></div> กลับเมนูหลัก</button>
             
+            {/* O-NET TAB */}
+            {activeTab === 'onet' && (
+              <div className="max-w-4xl mx-auto">
+                 <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 mb-8 shadow-sm">
+                    {/* ✅ If level is already set (e.g. Teacher P.6), show the tool directly. If ALL/Admin, show selection */}
+                    {!onetLevel ? (
+                        <div>
+                            <h4 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-xl"><Trophy className="text-yellow-500"/> เลือกระดับชั้นติว O-NET</h4>
+                            <div className="grid md:grid-cols-2 gap-6">
+                                <button onClick={() => { setOnetLevel('P6'); setAssignGrade('P6'); setNewlyGeneratedQuestions([]); }} className="bg-white p-8 rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition border-2 border-indigo-100 group text-center">
+                                    <div className="bg-indigo-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                                        <GraduationCap size={40} />
+                                    </div>
+                                    <h3 className="text-2xl font-bold text-gray-800 group-hover:text-indigo-700">พิชิต O-NET ป.6</h3>
+                                    <p className="text-gray-500 mt-2">ประถมศึกษาปีที่ 6</p>
+                                </button>
+                                <button onClick={() => { setOnetLevel('M3'); setAssignGrade('M3'); setNewlyGeneratedQuestions([]); }} className="bg-white p-8 rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition border-2 border-indigo-100 group text-center">
+                                    <div className="bg-purple-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                                        <GraduationCap size={40} />
+                                    </div>
+                                    <h3 className="text-2xl font-bold text-gray-800 group-hover:text-purple-700">พิชิต O-NET ม.3</h3>
+                                    <p className="text-gray-500 mt-2">มัธยมศึกษาปีที่ 3</p>
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="animate-fade-in">
+                            {/* Show Back button only if user has choice (is Admin or ALL) */}
+                            {(!teacher.gradeLevel || teacher.gradeLevel === 'ALL') && (
+                                <button onClick={() => setOnetLevel(null)} className="mb-4 flex items-center gap-1 text-indigo-600 font-bold hover:underline text-sm"><ArrowLeft size={16}/> กลับไปเลือกชั้น</button>
+                            )}
+                            <h4 className="font-bold text-indigo-900 mb-4 flex items-center gap-2 text-xl"><Trophy className="text-yellow-500"/> ติวเข้มพิชิต O-NET ({GRADE_LABELS[onetLevel]})</h4>
+                            
+                            <div className="space-y-4">
+                                <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm">
+                                <div className="grid md:grid-cols-2 gap-4 mb-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">วิชา (4 วิชาหลัก)</label>
+                                        <select value={assignSubject} onChange={(e) => setAssignSubject(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white text-gray-900 outline-none">
+                                            <option value="">-- เลือกวิชา --</option>
+                                            {ONET_SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">จำนวนข้อ</label>
+                                        <input type="number" value={assignCount} onChange={(e) => setAssignCount(Number(e.target.value))} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" min="5" max="20" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">กำหนดส่ง</label>
+                                        <input type="date" value={assignDeadline} onChange={(e) => setAssignDeadline(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">สาระที่ต้องการเน้น (Topic)</label>
+                                        <input type="text" value={assignAiTopic} onChange={(e) => setAssignAiTopic(e.target.value)} placeholder="เช่น พีชคณิต, การอ่านจับใจความ" className="w-full p-2.5 rounded-lg border border-gray-300 bg-white outline-none" />
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                        <label className="block text-xs font-bold text-gray-500 mb-1">Google Gemini API Key</label>
+                                        <div className="flex gap-2">
+                                            <input type="password" value={geminiApiKey} onChange={(e) => { setGeminiApiKey(e.target.value); localStorage.setItem('gemini_api_key', e.target.value); }} className="flex-1 p-2 border rounded-lg text-sm bg-gray-50" placeholder="วาง API Key ที่นี่..." />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-end">
+                                    <button 
+                                        onClick={handleOnetGenerateQuestions}
+                                        disabled={isGeneratingAi || !assignSubject || !assignAiTopic}
+                                        className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:scale-105 transition disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {isGeneratingAi ? <RefreshCw className="animate-spin"/> : <Sparkles size={18}/>}
+                                        สร้างข้อสอบ O-NET ด้วย AI
+                                    </button>
+                                </div>
+                                
+                                <div className="text-xs text-center text-indigo-400">
+                                    *ระบบจะวิเคราะห์แนวข้อสอบเก่า O-NET ปี 2560-2567 เพื่อสร้างข้อสอบใหม่ที่ใกล้เคียงที่สุด
+                                </div>
+
+                                {newlyGeneratedQuestions.length > 0 && (
+                                <div className="border rounded-xl overflow-hidden bg-white mt-6 shadow-md border-indigo-200">
+                                    <div className="bg-indigo-50 p-3 flex justify-between items-center border-b border-indigo-100">
+                                        <span className="font-bold text-indigo-900 text-sm">ตัวอย่างข้อสอบ ({newlyGeneratedQuestions.length} ข้อ)</span>
+                                        <button onClick={() => setNewlyGeneratedQuestions([])} className="text-xs text-red-500 hover:underline">ล้างทั้งหมด</button>
+                                    </div>
+                                    <div className="max-h-60 overflow-y-auto p-2 space-y-2">
+                                        {newlyGeneratedQuestions.map((q, i) => (
+                                            <div key={i} className="p-3 border rounded-lg bg-gray-50 text-sm relative group">
+                                                <div className="font-bold text-gray-800 pr-6">{i+1}. {q.text}</div>
+                                                <div className="text-gray-500 text-xs mt-1">ตอบ: {q.correct} | {q.explanation}</div>
+                                                <button onClick={() => setNewlyGeneratedQuestions(prev => prev.filter((_, idx) => idx !== i))} className="absolute top-2 right-2 text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="p-4 border-t bg-gray-50">
+                                        <div className="flex gap-2 mb-4">
+                                            <button 
+                                                onClick={handleOnetGenerateQuestions}
+                                                disabled={isGeneratingAi}
+                                                className="flex-1 py-2 bg-indigo-100 text-indigo-600 rounded-lg font-bold text-sm hover:bg-indigo-200 flex items-center justify-center gap-2"
+                                            >
+                                                {isGeneratingAi ? <RefreshCw size={14} className="animate-spin"/> : <PlusCircle size={14}/>} เพิ่มข้อสอบอีก
+                                            </button>
+                                        </div>
+
+                                        <div className="mb-2">
+                                            <label className="text-xs font-bold text-gray-500">ชื่อการบ้าน (ตั้งชื่ออัตโนมัติ)</label>
+                                            <input 
+                                            type="text" 
+                                            value={assignTitle || `[O-NET] ฝึกฝน${assignSubject} เรื่อง ${assignAiTopic}`} 
+                                            onChange={e => setAssignTitle(e.target.value)} 
+                                            className="w-full p-2 border rounded-lg bg-white"
+                                            />
+                                        </div>
+                                        <button 
+                                            onClick={handleFinalizeAssignment}
+                                            disabled={isProcessing}
+                                            className="w-full bg-green-500 text-white py-3 rounded-xl font-bold shadow hover:bg-green-600 disabled:opacity-50 flex justify-center items-center gap-2"
+                                        >
+                                            {isProcessing ? 'กำลังบันทึก...' : <><Save size={20}/> บันทึกเป็นการบ้าน</>}
+                                        </button>
+                                    </div>
+                                </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                 </div>
+
+                 {/* Only show list if Level is selected or if filteredOnetAssignments logic is adjusted */}
+                 {onetLevel && (
+                 <div className="mt-8">
+                     <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            <List size={20}/> รายการติว O-NET ({filteredOnetAssignments.length})
+                        </h3>
+                        <div className="flex bg-gray-100 p-1 rounded-lg">
+                            <button onClick={() => setOnetSubjectFilter('ALL')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${onetSubjectFilter === 'ALL' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>ทั้งหมด</button>
+                            {ONET_SUBJECTS.map(subj => (
+                                <button key={subj} onClick={() => setOnetSubjectFilter(subj)} className={`px-3 py-1 rounded-md text-xs font-bold transition ${onetSubjectFilter === subj ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>{subj}</button>
+                            ))}
+                        </div>
+                     </div>
+
+                     {filteredOnetAssignments.length === 0 ? (
+                         <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-xl bg-gray-50">
+                             {onetSubjectFilter === 'ALL' ? `ยังไม่ได้สร้างรายการติว O-NET ชั้น ${GRADE_LABELS[onetLevel]}` : `ไม่พบรายการติววิชา${onetSubjectFilter}`}
+                         </div>
+                     ) : (
+                         <div className="space-y-3">
+                             {filteredOnetAssignments.slice().reverse().map(a => (
+                                 <div key={a.id} className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center hover:shadow-md transition">
+                                     <div className="mb-2 md:mb-0">
+                                         <div className="font-bold text-indigo-900 text-lg">{a.title}</div>
+                                         <div className="text-sm text-gray-500 flex gap-4">
+                                             <span className="bg-indigo-50 text-indigo-600 px-2 rounded text-xs font-bold flex items-center">{a.subject}</span>
+                                             <span>{a.questionCount} ข้อ</span>
+                                             <span>กำหนดส่ง: {formatDate(a.deadline)}</span>
+                                         </div>
+                                     </div>
+                                     <div className="flex items-center gap-2">
+                                          <button onClick={() => handleViewAssignment(a)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-100">ดูรายละเอียด</button>
+                                          <button onClick={() => handleDeleteAssignment(a.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100"><Trash2 size={16}/></button>
+                                     </div>
+                                 </div>
+                             ))}
+                         </div>
+                     )}
+                 </div>
+                 )}
+              </div>
+            )}
+
             {/* ASSIGNMENTS TAB */}
             {activeTab === 'assignments' && (
               <div className="max-w-4xl mx-auto">
-                 {availableSubjects.length === 0 ? (
-                        <div className="text-red-500 text-center p-4 bg-red-50 rounded-xl border border-red-200 mb-4">
-                            กรุณาไปที่เมนู "จัดการรายวิชา" เพื่อเพิ่มวิชาก่อนสั่งงาน
-                        </div>
-                 ) : (
+                 {/* ✅ REMOVED EMPTY BLOCKER HERE - Now shows content even if subjects are empty */}
                  <div className="bg-gray-50 p-6 rounded-2xl border border-gray-200 mb-8 shadow-sm">
                     <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-orange-500"/> สั่งงานใหม่</h4>
                     
+                    {availableSubjects.length === 0 ? (
+                        <div className="text-red-500 text-center p-4 bg-red-50 rounded-xl border border-red-200 mb-4">
+                            กรุณาไปที่เมนู "จัดการรายวิชา" เพื่อเพิ่มวิชาก่อนสั่งงาน
+                        </div>
+                    ) : (
                     <div>
                         {/* Step 1: Assignment Details */}
                         {assignStep === 1 && (
@@ -982,8 +1200,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             </div>
                         )}
                     </div>
+                    )}
                  </div>
-                 )}
 
                  <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-bold text-gray-800">รายการการบ้าน ({normalAssignments.length})</h3>
@@ -1423,12 +1641,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                     </div>
 
                     <div className="space-y-3">
-                        <h4 className="font-bold text-gray-700">รายวิชาที่มีอยู่ ({myCreatedSubjects.length})</h4>
-                        {myCreatedSubjects.length === 0 ? (
+                        <h4 className="font-bold text-gray-700">รายวิชาที่มีอยู่ ({availableSubjects.length})</h4>
+                        {availableSubjects.length === 0 ? (
                             <div className="text-gray-400 text-center py-10 border-2 border-dashed rounded-xl">ยังไม่ได้สร้างรายวิชา</div>
                         ) : (
                             <div className="grid md:grid-cols-2 gap-3">
-                                {myCreatedSubjects.map(s => (
+                                {availableSubjects.map(s => (
                                     <div key={s.id} className={`flex items-center justify-between p-4 border rounded-xl hover:shadow-md transition ${s.color}`}>
                                         <div className="flex items-center gap-3">
                                             <div className="w-10 h-10 bg-white/60 rounded-full flex items-center justify-center backdrop-blur-sm shadow-sm">
@@ -1544,156 +1762,13 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                     )}
                 </div>
             )}
-
-            {/* O-NET TAB */}
-            {activeTab === 'onet' && isP6OrAdmin && (
-              // ... O-NET Content (No changes here, skipping for brevity but logic is preserved)
-              <div className="max-w-4xl mx-auto">
-                 <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 mb-8 shadow-sm">
-                    <h4 className="font-bold text-indigo-900 mb-4 flex items-center gap-2 text-xl"><Trophy className="text-yellow-500"/> ติวเข้มพิชิต O-NET (ป.6)</h4>
-                    {/* ... O-NET Implementation from previous code ... */}
-                    <div className="space-y-4 animate-fade-in">
-                        <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm">
-                           <div className="grid md:grid-cols-2 gap-4 mb-4">
-                               <div>
-                                   <label className="text-xs font-bold text-gray-500 block mb-1">วิชา (4 วิชาหลัก)</label>
-                                   <select value={assignSubject} onChange={(e) => setAssignSubject(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white text-gray-900 outline-none">
-                                       <option value="">-- เลือกวิชา --</option>
-                                       {ONET_SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
-                                   </select>
-                               </div>
-                               <div>
-                                   <label className="text-xs font-bold text-gray-500 block mb-1">จำนวนข้อ</label>
-                                   <input type="number" value={assignCount} onChange={(e) => setAssignCount(Number(e.target.value))} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" min="5" max="20" />
-                               </div>
-                               <div>
-                                   <label className="text-xs font-bold text-gray-500 block mb-1">กำหนดส่ง</label>
-                                   <input type="date" value={assignDeadline} onChange={(e) => setAssignDeadline(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" />
-                               </div>
-                               <div>
-                                   <label className="text-xs font-bold text-gray-500 block mb-1">สาระที่ต้องการเน้น (Topic)</label>
-                                   <input type="text" value={assignAiTopic} onChange={(e) => setAssignAiTopic(e.target.value)} placeholder="เช่น พีชคณิต, การอ่านจับใจความ" className="w-full p-2.5 rounded-lg border border-gray-300 bg-white outline-none" />
-                               </div>
-                           </div>
-                           
-                           <div>
-                                <label className="block text-xs font-bold text-gray-500 mb-1">Google Gemini API Key</label>
-                                <div className="flex gap-2">
-                                    <input type="password" value={geminiApiKey} onChange={(e) => { setGeminiApiKey(e.target.value); localStorage.setItem('gemini_api_key', e.target.value); }} className="flex-1 p-2 border rounded-lg text-sm bg-gray-50" placeholder="วาง API Key ที่นี่..." />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex justify-end">
-                            <button 
-                                onClick={handleOnetGenerateQuestions}
-                                disabled={isGeneratingAi || !assignSubject || !assignAiTopic}
-                                className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:scale-105 transition disabled:opacity-50 flex items-center gap-2"
-                            >
-                                {isGeneratingAi ? <RefreshCw className="animate-spin"/> : <Sparkles size={18}/>}
-                                สร้างข้อสอบ O-NET ด้วย AI
-                            </button>
-                        </div>
-                        
-                        <div className="text-xs text-center text-indigo-400">
-                             *ระบบจะวิเคราะห์แนวข้อสอบเก่า O-NET ปี 2560-2566 เพื่อสร้างข้อสอบใหม่ที่ใกล้เคียงที่สุด
-                        </div>
-
-                        {newlyGeneratedQuestions.length > 0 && (
-                          <div className="border rounded-xl overflow-hidden bg-white mt-6 shadow-md border-indigo-200">
-                              <div className="bg-indigo-50 p-3 flex justify-between items-center border-b border-indigo-100">
-                                  <span className="font-bold text-indigo-900 text-sm">ตัวอย่างข้อสอบ ({newlyGeneratedQuestions.length} ข้อ)</span>
-                                  <button onClick={() => setNewlyGeneratedQuestions([])} className="text-xs text-red-500 hover:underline">ล้างทั้งหมด</button>
-                              </div>
-                              <div className="max-h-60 overflow-y-auto p-2 space-y-2">
-                                  {newlyGeneratedQuestions.map((q, i) => (
-                                      <div key={i} className="p-3 border rounded-lg bg-gray-50 text-sm relative group">
-                                          <div className="font-bold text-gray-800 pr-6">{i+1}. {q.text}</div>
-                                          <div className="text-gray-500 text-xs mt-1">ตอบ: {q.correct} | {q.explanation}</div>
-                                          <button onClick={() => setNewlyGeneratedQuestions(prev => prev.filter((_, idx) => idx !== i))} className="absolute top-2 right-2 text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
-                                      </div>
-                                  ))}
-                              </div>
-                              <div className="p-4 border-t bg-gray-50">
-                                  <div className="flex gap-2 mb-4">
-                                      <button 
-                                          onClick={handleOnetGenerateQuestions}
-                                          disabled={isGeneratingAi}
-                                          className="flex-1 py-2 bg-indigo-100 text-indigo-600 rounded-lg font-bold text-sm hover:bg-indigo-200 flex items-center justify-center gap-2"
-                                      >
-                                          {isGeneratingAi ? <RefreshCw size={14} className="animate-spin"/> : <PlusCircle size={14}/>} เพิ่มข้อสอบอีก
-                                      </button>
-                                  </div>
-
-                                  <div className="mb-2">
-                                     <label className="text-xs font-bold text-gray-500">ชื่อการบ้าน (ตั้งชื่ออัตโนมัติ)</label>
-                                     <input 
-                                       type="text" 
-                                       value={assignTitle || `[O-NET] ฝึกฝน${assignSubject} เรื่อง ${assignAiTopic}`} 
-                                       onChange={e => setAssignTitle(e.target.value)} 
-                                       className="w-full p-2 border rounded-lg bg-white"
-                                     />
-                                  </div>
-                                  <button 
-                                      onClick={handleFinalizeAssignment}
-                                      disabled={isProcessing}
-                                      className="w-full bg-green-500 text-white py-3 rounded-xl font-bold shadow hover:bg-green-600 disabled:opacity-50 flex justify-center items-center gap-2"
-                                  >
-                                      {isProcessing ? 'กำลังบันทึก...' : <><Save size={20}/> บันทึกเป็นการบ้าน</>}
-                                  </button>
-                              </div>
-                          </div>
-                        )}
-                    </div>
-                 </div>
-
-                 <div className="mt-8">
-                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                            <List size={20}/> รายการติว O-NET ({filteredOnetAssignments.length})
-                        </h3>
-                        <div className="flex bg-gray-100 p-1 rounded-lg">
-                            <button onClick={() => setOnetSubjectFilter('ALL')} className={`px-3 py-1 rounded-md text-xs font-bold transition ${onetSubjectFilter === 'ALL' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>ทั้งหมด</button>
-                            {ONET_SUBJECTS.map(subj => (
-                                <button key={subj} onClick={() => setOnetSubjectFilter(subj)} className={`px-3 py-1 rounded-md text-xs font-bold transition ${onetSubjectFilter === subj ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>{subj}</button>
-                            ))}
-                        </div>
-                     </div>
-
-                     {filteredOnetAssignments.length === 0 ? (
-                         <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-xl bg-gray-50">
-                             {onetSubjectFilter === 'ALL' ? 'ยังไม่ได้สร้างรายการติว O-NET' : `ไม่พบรายการติววิชา${onetSubjectFilter}`}
-                         </div>
-                     ) : (
-                         <div className="space-y-3">
-                             {filteredOnetAssignments.slice().reverse().map(a => (
-                                 <div key={a.id} className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center hover:shadow-md transition">
-                                     <div className="mb-2 md:mb-0">
-                                         <div className="font-bold text-indigo-900 text-lg">{a.title}</div>
-                                         <div className="text-sm text-gray-500 flex gap-4">
-                                             <span className="bg-indigo-50 text-indigo-600 px-2 rounded text-xs font-bold flex items-center">{a.subject}</span>
-                                             <span>{a.questionCount} ข้อ</span>
-                                             <span>กำหนดส่ง: {formatDate(a.deadline)}</span>
-                                         </div>
-                                     </div>
-                                     <div className="flex items-center gap-2">
-                                          <button onClick={() => handleViewAssignment(a)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-100">ดูรายละเอียด</button>
-                                          <button onClick={() => handleDeleteAssignment(a.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100"><Trash2 size={16}/></button>
-                                     </div>
-                                 </div>
-                             ))}
-                         </div>
-                     )}
-                 </div>
-              </div>
-            )}
-            
         </div>
       )}
       
-      {/* ... [Modals] ... */}
+      {/* ... [Modals: Assignments, Stats] ... */}
       {selectedAssignment && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              {/* Existing Assignment Modal Implementation */}
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col animate-fade-in overflow-hidden">
                   <div className="p-4 border-b flex justify-between items-center bg-gray-50">
                       <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2"><Calendar size={20} className="text-blue-600"/> รายละเอียดการส่งงาน</h3>
@@ -1793,7 +1868,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
           </div>
       )}
 
-      {/* MODAL: Student Stats Breakdown */}
       {selectedStudentForStats && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col animate-fade-in">

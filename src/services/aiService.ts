@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
 export interface GeneratedQuestion {
@@ -18,6 +17,23 @@ const generateImageUrl = (description: string): string => {
   return `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true`;
 };
 
+// ✅ Helper to map short grade to full name for AI context
+const getFullGradeName = (grade: string): string => {
+  const map: Record<string, string> = {
+    'P1': 'Prathom 1 (Grade 1)',
+    'P2': 'Prathom 2 (Grade 2)',
+    'P3': 'Prathom 3 (Grade 3)',
+    'P4': 'Prathom 4 (Grade 4)',
+    'P5': 'Prathom 5 (Grade 5)',
+    'P6': 'Prathom 6 (Grade 6)',
+    'M1': 'Matthayom 1 (Grade 7)',
+    'M2': 'Matthayom 2 (Grade 8)',
+    'M3': 'Matthayom 3 (Grade 9)',
+    'ALL': 'Elementary to Junior High School level'
+  };
+  return map[grade] || grade;
+};
+
 export const generateQuestionWithAI = async (
   subject: string,
   grade: string,
@@ -34,25 +50,29 @@ export const generateQuestionWithAI = async (
     const ai = new GoogleGenAI({ apiKey: apiKey });
     const model = "gemini-2.5-flash";
     
+    // ✅ Use full grade name for better AI context
+    const targetGrade = getFullGradeName(grade);
     let systemInstruction = "";
     
     if (style === 'onet') {
-      // 🟢 O-NET Specific Instruction
+      // 🟢 O-NET Specific Instruction (Updated for P1-M3 support)
       systemInstruction = `
-        You are an expert exam creator for Thailand's O-NET (Ordinary National Educational Test) for Grade 6 (Prathom 6).
-        Your task is to generate standardized exam questions by simulating the style, difficulty, and format of past O-NET exam papers (ข้อสอบเก่า).
+        You are an expert exam creator for Thailand's O-NET (Ordinary National Educational Test) style assessments.
+        Target Audience: Students in ${targetGrade}.
+        
+        Your task is to generate standardized exam questions by analyzing and simulating the style, difficulty, and format of past O-NET exam papers (ข้อสอบเก่า) from B.E. 2560-2567 (A.D. 2017-2024), specifically tailored for ${targetGrade}.
         
         Key Requirements for O-NET Style:
-        - Reference: Mimic the style of actual past O-NET exams (ปี 2560-2566).
-        - Difficulty: Challenging, requiring critical thinking (คิดวิเคราะห์), integration of knowledge, not just rote memory.
+        - Reference: Mimic the style of actual past O-NET exams (ปี 2560-2567).
+        - Difficulty: Challenging and appropriate for the specific grade level (${targetGrade}), requiring critical thinking (คิดวิเคราะห์), integration of knowledge, application skills, not just rote memory.
         - Language: Formal Academic Thai (ภาษาทางการแบบข้อสอบจริง).
-        - Subject Context: Strictly aligns with the Thai Basic Education Curriculum B.E. 2551 (Updated 2560).
-        - Question Types: Situation-based questions, reading comprehension, or problem-solving scenarios often found in O-NET.
+        - Subject Context: Strictly aligns with the Thai Basic Education Curriculum B.E. 2551 (Updated 2560) for ${targetGrade}.
+        - Question Types: Situation-based questions, reading comprehension, charts/graphs interpretation, or problem-solving scenarios often found in O-NET exams.
       `;
     } else {
       // 🟢 Normal Instruction
       systemInstruction = `
-        You are a helpful teacher assistant creating multiple-choice questions for ${grade} grade students.
+        You are a helpful teacher assistant creating multiple-choice questions for ${targetGrade} grade students.
         Language: Thai (Natural, age-appropriate, and encouraging).
       `;
     }

@@ -24,8 +24,11 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
 
   const GRADE_LABELS: Record<string, string> = {
       'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3',
-      'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6'
+      'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6',
+      'M1': 'ม.1', 'M2': 'ม.2', 'M3': 'ม.3'
   };
+
+  const GRADE_KEYS = ['P1','P2','P3','P4','P5','P6','M1','M2','M3'];
 
   useEffect(() => {
     const loadData = async () => {
@@ -128,7 +131,7 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
         <div className="mb-6">
             <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2"><GraduationCap size={18}/> 0. เลือกระดับชั้น</label>
             <div className="grid grid-cols-3 gap-2">
-                {['P1','P2','P3','P4','P5','P6'].map(g => (
+                {GRADE_KEYS.map(g => (
                     <button key={g} onClick={() => setSelectedGrade(g)} className={`py-2 rounded-lg border-2 font-bold transition ${selectedGrade === g ? 'border-purple-500 bg-purple-100 text-purple-800 shadow-sm' : 'border-gray-100 hover:bg-gray-50'}`}>
                         {GRADE_LABELS[g]}
                     </button>
