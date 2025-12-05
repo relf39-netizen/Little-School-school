@@ -1,4 +1,3 @@
-
 // services/api.ts
 
 import { Student, Question, Teacher, Subject, ExamResult, Assignment, SubjectConfig, School, RegistrationRequest } from '../types'; 
@@ -287,6 +286,8 @@ export const manageTeacher = async (data: {
              if (data.password) updateData.password = data.password;
              if (data.school) updateData.school = cleanSchool;
              if (data.gradeLevel) updateData.gradeLevel = data.gradeLevel;
+             // ✅ Update role if provided
+             if (data.role) updateData.role = data.role;
              await db.ref(`teachers/${data.id}`).update(updateData);
         } else if (data.action === 'delete' && data.id) {
              await db.ref(`teachers/${data.id}`).remove();
