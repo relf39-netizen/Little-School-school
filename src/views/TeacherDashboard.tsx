@@ -1,18 +1,18 @@
-
 import React, { useState, useEffect } from 'react';
 import { Teacher, Student, Subject, Assignment, Question, SubjectConfig, School, RegistrationRequest } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, Users, GraduationCap, Trash2, Edit, Shield, UserCog, KeyRound, Sparkles, Wand2, Key, HelpCircle, ChevronDown, ChevronUp, Layers, Clock, Library, Palette, Type, AlertCircle, ArrowRight, BrainCircuit, List, CheckSquare, Trophy, Lock, User, Activity, Building, CreditCard, Check, ToggleLeft, ToggleRight } from 'lucide-react';
-import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration } from '../services/api';
+import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, Users, GraduationCap, Trash2, Edit, Shield, UserCog, KeyRound, Sparkles, Wand2, Key, HelpCircle, ChevronDown, ChevronUp, Layers, Clock, Library, Palette, Type, AlertCircle, ArrowRight, BrainCircuit, List, CheckSquare, Trophy, Lock, User, Activity, Building, CreditCard, Check, ToggleLeft, ToggleRight, Search, Briefcase } from 'lucide-react';
+import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration, verifyStudentLogin } from '../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../services/aiService';
 
 interface TeacherDashboardProps {
   teacher: Teacher;
   onLogout: () => void;
   onStartGame: () => void; 
+  onAdminLoginAsStudent: (student: Student) => void;
 }
 
-const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, onStartGame }) => {
-  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'subjects' | 'stats' | 'questions' | 'assignments' | 'teachers' | 'registrations' | 'profile' | 'onet'>('menu');
+const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, onStartGame, onAdminLoginAsStudent }) => {
+  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'subjects' | 'stats' | 'questions' | 'assignments' | 'teachers' | 'registrations' | 'profile' | 'onet' | 'admin_stats'>('menu');
   
   const [students, setStudents] = useState<Student[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -38,6 +38,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const [newTeacherSchool, setNewTeacherSchool] = useState('');
   // ✅ Changed: Support multiple grades for teacher creation
   const [newTeacherGrades, setNewTeacherGrades] = useState<string[]>(['ALL']); 
+  const [newTeacherRole, setNewTeacherRole] = useState<string>('TEACHER'); // Default role
   const [editingTeacherId, setEditingTeacherId] = useState<string | null>(null); 
   
   // Registration Management
@@ -51,21 +52,26 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const [profilePassword, setProfilePassword] = useState('');
   const [profileConfirmPass, setProfileConfirmPass] = useState('');
 
-  // ✅ Permissions Logic (Updated for Multi-Grade)
-  // Helper to get array of grades from teacher object
+  // Admin Stats State
+  const [impersonateId, setImpersonateId] = useState('');
+  const [adminViewGrade, setAdminViewGrade] = useState<string | null>(null);
+
+  // ✅ Permissions Logic
   const getTeacherGrades = (t: Teacher): string[] => {
       if (!t.gradeLevel) return ['ALL'];
       return t.gradeLevel.split(',').map(g => g.trim());
   };
 
   const myGrades = getTeacherGrades(teacher);
-  const canManageAll = myGrades.includes('ALL');
   
-  // Robust Admin Check (Check both Role and Username fallback)
-  const isAdmin = (teacher.role && teacher.role.toUpperCase() === 'ADMIN') || 
-                  (teacher.username && teacher.username.toLowerCase() === 'admin');
+  // Check for specific roles
+  const isAdmin = (teacher.role && teacher.role.toUpperCase() === 'ADMIN') || (teacher.username && teacher.username.toLowerCase() === 'admin');
+  const isDirector = teacher.role === 'DIRECTOR';
+  
+  // Director can manage all, just like someone with 'ALL' grade
+  const canManageAll = myGrades.includes('ALL') || isDirector;
 
-  // ✅ New Logic: O-NET Access (If teaches P6, M3, or is Admin)
+  // ✅ New Logic: O-NET Access (If teaches P6, M3, or is Admin/Director)
   const canAccessOnet = canManageAll || myGrades.includes('P6') || myGrades.includes('M3');
 
   // Student Form & Management State
@@ -301,6 +307,75 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     });
   };
 
+  // --- Admin Stats Handlers ---
+  const handleImpersonate = async () => {
+    if (!impersonateId) return alert('กรุณากรอกรหัสนักเรียน');
+    if (impersonateId.length !== 5) return alert('รหัสนักเรียนต้องมี 5 หลัก');
+    
+    setIsProcessing(true);
+    setProcessingMessage('กำลังค้นหานักเรียน...');
+    
+    // 1. Search in loaded students first
+    let target = students.find(s => s.id === impersonateId);
+    
+    // 2. If not found, try API directly
+    if (!target) {
+        const found = await verifyStudentLogin(impersonateId);
+        if (found) target = found;
+    }
+    setIsProcessing(false);
+
+    if (target) {
+        if (confirm(`เข้าสู่หน้าจอของนักเรียน: ${target.name} (${target.id})?`)) {
+            onAdminLoginAsStudent(target);
+        }
+    } else {
+        alert('ไม่พบข้อมูลนักเรียนรหัสนี้');
+    }
+  };
+
+  const getGradeStats = (grade: string) => {
+      const gradeStudents = students.filter(s => s.grade === grade);
+      const studentIds = gradeStudents.map(s => s.id);
+      const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)));
+      
+      let totalScorePercent = 0;
+      let count = 0;
+      gradeResults.forEach(r => {
+          const totalQ = Number(r.totalQuestions);
+          const score = Number(r.score) || 0;
+          if (totalQ > 0) {
+              totalScorePercent += (score / totalQ) * 100;
+              count++;
+          }
+      });
+      
+      const avg = count > 0 ? Math.round(totalScorePercent / count) : 0;
+      return {
+          studentCount: gradeStudents.length,
+          avgScore: avg,
+          activityCount: count
+      };
+  };
+
+  // Calculate Average Score for a specific Subject in a specific Grade
+  const getSubjectGradeAverage = (subjectName: string, grade: string) => {
+      const gradeStudents = students.filter(s => s.grade === grade).map(s => s.id);
+      const subjectResults = stats.filter(r => r.subject === subjectName && gradeStudents.includes(String(r.studentId)));
+      
+      let totalPercent = 0;
+      let count = 0;
+      subjectResults.forEach(r => {
+          const totalQ = Number(r.totalQuestions);
+          const score = Number(r.score) || 0;
+          if(totalQ > 0) {
+              totalPercent += (score / totalQ) * 100;
+              count++;
+          }
+      });
+      return count > 0 ? Math.round(totalPercent / count) : 0;
+  };
+
   // --- Handlers ---
 
   const handleUpdateProfile = async () => {
@@ -434,7 +509,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
           name: newTeacherName,
           username: newTeacherUser,
           school: newTeacherSchool || teacher.school,
-          role: 'TEACHER',
+          role: newTeacherRole, // Include Role
           gradeLevel: gradeLevelString
       };
 
@@ -446,13 +521,14 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
       
       setIsProcessing(false);
       if (res.success) {
-          alert(editingTeacherId ? '✅ แก้ไขข้อมูลครูเรียบร้อย' : '✅ เพิ่มบัญชีครูเรียบร้อย');
+          alert(editingTeacherId ? '✅ แก้ไขข้อมูลบุคลากรเรียบร้อย' : '✅ เพิ่มบัญชีบุคลากรเรียบร้อย');
           // Reset Form
           setNewTeacherName(''); 
           setNewTeacherUser(''); 
           setNewTeacherPass(''); 
           if(!selectedSchoolForView) setNewTeacherSchool(''); // Keep school if in view mode
           setNewTeacherGrades(['ALL']);
+          setNewTeacherRole('TEACHER');
           setEditingTeacherId(null);
           loadData();
       } else {
@@ -466,6 +542,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
       setNewTeacherUser(t.username || '');
       setNewTeacherPass(''); // Don't show password for security
       setNewTeacherSchool(t.school);
+      setNewTeacherRole(t.role || 'TEACHER');
       
       // ✅ Parse comma separated grades
       if (t.gradeLevel) {
@@ -551,6 +628,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   };
 
   const handleDeleteStudent = async (id: string) => {
+    if (isDirector) return alert("ผู้อำนวยการไม่สามารถลบนักเรียนได้");
     if (!confirm('ยืนยันการลบนักเรียนคนนี้? ข้อมูลคะแนนจะหายไปทั้งหมด')) return;
     setIsProcessing(true);
     setProcessingMessage('กำลังลบข้อมูล...');
@@ -872,7 +950,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
           <div className="opacity-90 text-sm mt-1 flex gap-2 items-center">
              <span>{teacher.school} • คุณครู{teacher.name}</span>
              <span className={`px-2 py-0.5 rounded text-xs font-bold ${canManageAll ? 'bg-yellow-400 text-yellow-900' : 'bg-green-400 text-green-900'}`}>
-                 {canManageAll ? 'ดูแลทุกชั้น' : `ดูแล ${myGrades.join(', ')}`}
+                 {isDirector ? 'ผู้อำนวยการ' : (canManageAll ? 'ดูแลทุกชั้น' : `ดูแล ${myGrades.join(', ')}`)}
              </span>
           </div>
         </div>
@@ -881,7 +959,25 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
       {activeTab === 'menu' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4 md:px-0">
-            <MenuCard icon={<Library size={40} />} title="จัดการรายวิชา" desc="เพิ่ม/ลบ รายวิชาที่สอน" color="bg-pink-50 text-pink-600 border-pink-200" onClick={() => setActiveTab('subjects')} />
+            {/* Conditional Rendering for Subject/Director Card */}
+            {isDirector ? (
+                <MenuCard 
+                    icon={<BarChart2 size={40} />} 
+                    title="สถิติและการพัฒนาผู้เรียน (สำหรับผู้บริหาร)" 
+                    desc="ดูค่าเฉลี่ยและพัฒนาการผู้เรียนในแต่ละระดับชั้น" 
+                    color="bg-orange-50 text-orange-600 border-orange-200" 
+                    onClick={() => setActiveTab('admin_stats')} 
+                />
+            ) : (
+                <MenuCard 
+                    icon={<Library size={40} />} 
+                    title="จัดการรายวิชา" 
+                    desc="เพิ่ม/ลบ รายวิชาที่สอน" 
+                    color="bg-pink-50 text-pink-600 border-pink-200" 
+                    onClick={() => setActiveTab('subjects')} 
+                />
+            )}
+
             <MenuCard icon={<UserPlus size={40} />} title="จัดการนักเรียน" desc="ลงทะเบียนและแก้ไขข้อมูล" color="bg-purple-50 text-purple-600 border-purple-200" onClick={() => setActiveTab('students')} />
             <MenuCard icon={<Calendar size={40} />} title="สั่งการบ้าน" desc="มอบหมายงานและติดตาม" color="bg-orange-50 text-orange-600 border-orange-200" onClick={() => { setActiveTab('assignments'); setAssignStep(1); setAssignTitle(''); setNewlyGeneratedQuestions([]); }} />
             <MenuCard icon={<BarChart2 size={40} />} title="ดูผลคะแนน" desc="สถิติการสอบ" color="bg-green-50 text-green-600 border-green-200" onClick={() => setActiveTab('stats')} />
@@ -905,6 +1001,17 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 color="bg-indigo-50 text-indigo-600 border-indigo-200 shadow-indigo-100" 
                 onClick={() => { setActiveTab('onet'); setAssignStep(1); setNewlyGeneratedQuestions([]); }} 
             />
+            )}
+
+            {/* ✅ Admin Stats Card - Only for System Admin (Role Admin) - Director has their own card now */}
+            {isAdmin && !isDirector && (
+                <MenuCard 
+                  icon={<BarChart2 size={40} />} 
+                  title="สถิติโรงเรียน (Admin)" 
+                  desc="ดูภาพรวมและเข้าถึงมุมมองนักเรียน" 
+                  color="bg-orange-50 text-orange-600 border-orange-200 shadow-orange-100" 
+                  onClick={() => setActiveTab('admin_stats')} 
+                />
             )}
 
             {/* Admin Only Card */}
@@ -933,11 +1040,146 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         <div className="bg-white rounded-3xl shadow-sm p-4 md:p-6 min-h-[400px] relative animate-fade-in">
             <button onClick={() => { setActiveTab('menu'); setEditingStudentId(null); setCreatedStudent(null); setSelectedStudentForStats(null); }} className="mb-6 flex items-center gap-2 text-gray-500 hover:text-purple-600 font-bold transition-colors"><div className="bg-gray-100 p-2 rounded-full"><ArrowLeft size={20} /></div> กลับเมนูหลัก</button>
             
+            {/* ADMIN STATS TAB (Used for both System Admin and Director) */}
+            {activeTab === 'admin_stats' && (isAdmin || isDirector) && (
+                <div className="max-w-6xl mx-auto">
+                    
+                    {/* Header */}
+                    <div className="flex items-center gap-3 mb-8">
+                        <div className="bg-orange-100 p-3 rounded-full text-orange-600"><BarChart2 size={32}/></div>
+                        <div>
+                            <h3 className="text-2xl font-bold text-gray-800">สถิติและการพัฒนาผู้เรียน (สำหรับผู้บริหาร)</h3>
+                            <p className="text-gray-500">ติดตามผลการเรียนและเข้าถึงข้อมูลเชิงลึกรายบุคคล</p>
+                        </div>
+                    </div>
+
+                    {/* Section 1: Impersonation */}
+                    <div className="bg-orange-50 border border-orange-200 rounded-2xl p-6 mb-8 shadow-sm">
+                        <h4 className="font-bold text-orange-800 mb-4 flex items-center gap-2"><KeyRound size={20}/> เข้าถึงมุมมองนักเรียน</h4>
+                        <div className="flex gap-2 max-w-md">
+                            <input 
+                                type="text" 
+                                value={impersonateId} 
+                                onChange={e => setImpersonateId(e.target.value.replace(/[^0-9]/g, ''))}
+                                maxLength={5}
+                                placeholder="รหัสนักเรียน 5 หลัก" 
+                                className="flex-1 p-3 rounded-xl border border-orange-200 focus:ring-2 focus:ring-orange-300 outline-none"
+                            />
+                            <button onClick={handleImpersonate} className="bg-orange-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-orange-700 shadow-md">
+                                เข้าสู่ระบบ
+                            </button>
+                        </div>
+                        <p className="text-xs text-orange-600 mt-2">* ใช้สำหรับตรวจสอบความก้าวหน้าของนักเรียนรายบุคคลในมุมมองจริง</p>
+                    </div>
+
+                    {/* Section 2: Grade Level Overview */}
+                    <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><Layers size={20}/> ภาพรวมแต่ละระดับชั้น</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+                        {GRADES.map(g => {
+                            const stats = getGradeStats(g);
+                            return (
+                                <button 
+                                    key={g} 
+                                    onClick={() => setAdminViewGrade(g)}
+                                    className={`p-4 rounded-xl border-2 text-left transition-all hover:-translate-y-1 ${adminViewGrade === g ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : 'border-gray-100 bg-white hover:shadow-md'}`}
+                                >
+                                    <div className="font-black text-2xl text-gray-300 mb-2">{GRADE_LABELS[g]}</div>
+                                    <div className="flex justify-between items-end">
+                                        <div>
+                                            <div className="text-xs text-gray-500">นักเรียน</div>
+                                            <div className="font-bold text-lg text-gray-800">{stats.studentCount}</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-xs text-gray-500">คะแนนเฉลี่ย</div>
+                                            <div className={`font-bold text-lg ${stats.avgScore >= 70 ? 'text-green-600' : stats.avgScore >= 50 ? 'text-yellow-600' : 'text-gray-400'}`}>
+                                                {stats.avgScore}%
+                                            </div>
+                                        </div>
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Section 3: Drill Down */}
+                    {adminViewGrade && (
+                        <div className="animate-fade-in border-t pt-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h4 className="font-bold text-xl text-blue-800">รายละเอียดชั้น {GRADE_LABELS[adminViewGrade]}</h4>
+                                <button onClick={() => setAdminViewGrade(null)} className="text-sm text-red-500 hover:underline">ปิดรายละเอียด</button>
+                            </div>
+
+                            <div className="grid md:grid-cols-2 gap-8">
+                                {/* Subjects Stats List (Modified for Director View) */}
+                                <div className="bg-white border rounded-xl p-4 shadow-sm">
+                                    <h5 className="font-bold text-gray-700 mb-3 flex items-center gap-2"><Book size={18}/> คะแนนเฉลี่ยรายวิชา</h5>
+                                    {availableSubjects.filter(s => s.grade === adminViewGrade || s.grade === 'ALL').length > 0 ? (
+                                        <div className="space-y-2">
+                                            {availableSubjects.filter(s => s.grade === adminViewGrade || s.grade === 'ALL').map(s => {
+                                                const avgScore = getSubjectGradeAverage(s.name, adminViewGrade);
+                                                return (
+                                                    <div key={s.id} className="p-3 rounded-lg border bg-white flex flex-col gap-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className={`p-1 rounded-full text-white bg-blue-500`}>{SUBJECT_ICONS.find(i=>i.name===s.icon)?.component}</div>
+                                                                <span className="font-bold text-gray-800">{s.name}</span>
+                                                            </div>
+                                                            <div className={`font-black text-xl ${avgScore >= 70 ? 'text-green-600' : avgScore >= 50 ? 'text-yellow-600' : 'text-red-500'}`}>
+                                                                {avgScore}%
+                                                            </div>
+                                                        </div>
+                                                        {/* Progress Bar */}
+                                                        <div className="w-full bg-gray-100 rounded-full h-2">
+                                                            <div className={`h-2 rounded-full ${avgScore >= 70 ? 'bg-green-500' : avgScore >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{width: `${avgScore}%`}}></div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-4 text-gray-400 text-sm">ไม่มีรายวิชาเฉพาะชั้นนี้</div>
+                                    )}
+                                </div>
+
+                                {/* Top Students List */}
+                                <div className="bg-white border rounded-xl p-4 shadow-sm">
+                                    <h5 className="font-bold text-gray-700 mb-3 flex items-center gap-2"><Trophy size={18}/> นักเรียนในระดับชั้น ({students.filter(s => s.grade === adminViewGrade).length})</h5>
+                                    <div className="max-h-60 overflow-y-auto pr-2">
+                                        {students.filter(s => s.grade === adminViewGrade).length > 0 ? (
+                                            students.filter(s => s.grade === adminViewGrade).map(s => {
+                                                const { average } = getStudentOverallStats(s.id);
+                                                return (
+                                                    <div key={s.id} className="flex justify-between items-center p-2 border-b last:border-0 hover:bg-gray-50 rounded">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xl">{s.avatar}</span>
+                                                            <div>
+                                                                <div className="font-bold text-sm text-gray-800">{s.name}</div>
+                                                                <div className="text-xs text-gray-400">{s.id}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="font-bold text-blue-600">{average}%</div>
+                                                            <div className="text-[10px] text-gray-400">เฉลี่ยรวม</div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        ) : (
+                                            <div className="text-center py-4 text-gray-400 text-sm">ไม่มีนักเรียนในชั้นนี้</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* O-NET TAB */}
             {activeTab === 'onet' && (
               <div className="max-w-4xl mx-auto">
                  <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 mb-8 shadow-sm">
-                    {/* ✅ If level is already set (e.g. Teacher P.6), show the tool directly. If ALL/Admin, show selection */}
+                    {/* ... (Existing O-NET Code) ... */}
                     {!onetLevel ? (
                         <div>
                             <h4 className="font-bold text-indigo-900 mb-6 flex items-center gap-2 text-xl"><Trophy className="text-yellow-500"/> เลือกระดับชั้นติว O-NET</h4>
@@ -1096,7 +1338,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                      </div>
                                      <div className="flex items-center gap-2">
                                           <button onClick={() => handleViewAssignment(a)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-100">ดูรายละเอียด</button>
-                                          <button onClick={() => handleDeleteAssignment(a.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100"><Trash2 size={16}/></button>
+                                          {!isDirector && <button onClick={() => handleDeleteAssignment(a.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100"><Trash2 size={16}/></button>}
                                      </div>
                                  </div>
                              ))}
@@ -1588,6 +1830,16 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                         <label className="text-xs font-bold text-gray-500 block mb-1">Password {editingTeacherId && '(เว้นว่างถ้าไม่เปลี่ยน)'}</label>
                                         <input type="text" value={newTeacherPass} onChange={e => setNewTeacherPass(e.target.value)} className="w-full p-2 border rounded-lg bg-white" placeholder={editingTeacherId ? "เว้นว่างไว้หากไม่เปลี่ยน" : "กำหนดรหัสผ่าน"} />
                                     </div>
+                                    
+                                    {/* Role Selection */}
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">ตำแหน่ง</label>
+                                        <select value={newTeacherRole} onChange={(e) => setNewTeacherRole(e.target.value)} className="w-full p-2 border rounded-lg bg-white">
+                                            <option value="TEACHER">คุณครู (Teacher)</option>
+                                            <option value="DIRECTOR">ผู้อำนวยการ (Director)</option>
+                                        </select>
+                                    </div>
+
                                     <div className="col-span-2 md:col-span-1">
                                         <label className="text-xs font-bold text-gray-500 block mb-1">ระดับชั้นที่ดูแล (เลือกได้มากกว่า 1)</label>
                                         <div className="grid grid-cols-4 gap-2">
@@ -1613,25 +1865,28 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                 </div>
                                 <div className="flex gap-2">
                                     {editingTeacherId && (
-                                        <button onClick={() => { setEditingTeacherId(null); setNewTeacherName(''); setNewTeacherUser(''); setNewTeacherPass(''); setNewTeacherGrades(['ALL']); }} className="px-6 py-2 bg-gray-200 rounded-lg font-bold text-gray-600 hover:bg-gray-300">ยกเลิก</button>
+                                        <button onClick={() => { setEditingTeacherId(null); setNewTeacherName(''); setNewTeacherUser(''); setNewTeacherPass(''); setNewTeacherGrades(['ALL']); setNewTeacherRole('TEACHER'); }} className="px-6 py-2 bg-gray-200 rounded-lg font-bold text-gray-600 hover:bg-gray-300">ยกเลิก</button>
                                     )}
                                     <button onClick={handleSaveTeacher} disabled={isProcessing} className={`flex-1 text-white py-2 rounded-lg font-bold shadow transition ${editingTeacherId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-gray-800 hover:bg-black'}`}>
-                                        {isProcessing ? 'กำลังบันทึก...' : (editingTeacherId ? 'บันทึกการแก้ไข' : '+ เพิ่มบัญชีครู')}
+                                        {isProcessing ? 'กำลังบันทึก...' : (editingTeacherId ? 'บันทึกการแก้ไข' : '+ เพิ่มบัญชีบุคลากร')}
                                     </button>
                                 </div>
                             </div>
 
                             <div className="bg-white rounded-xl border overflow-hidden">
-                                <div className="p-4 bg-gray-100 font-bold text-gray-600 border-b">รายชื่อครู ({allTeachers.filter(t => t.school === selectedSchoolForView).length})</div>
+                                <div className="p-4 bg-gray-100 font-bold text-gray-600 border-b">รายชื่อบุคลากร ({allTeachers.filter(t => t.school === selectedSchoolForView).length})</div>
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-gray-50 text-gray-500">
-                                        <tr><th className="p-3">ชื่อ</th><th className="p-3">Username</th><th className="p-3">ชั้นที่ดูแล</th><th className="p-3 text-right">จัดการ</th></tr>
+                                        <tr><th className="p-3">ชื่อ</th><th className="p-3">Username</th><th className="p-3">ตำแหน่ง</th><th className="p-3">ชั้นที่ดูแล</th><th className="p-3 text-right">จัดการ</th></tr>
                                     </thead>
                                     <tbody>
                                         {allTeachers.filter(t => t.school === selectedSchoolForView).map(t => (
                                             <tr key={t.id} className="border-b last:border-0 hover:bg-gray-50">
                                                 <td className="p-3 font-bold">{t.name} {t.role === 'ADMIN' && <span className="bg-yellow-100 text-yellow-800 text-[10px] px-1 rounded ml-1">ADMIN</span>}</td>
                                                 <td className="p-3 font-mono text-gray-500">{t.username}</td>
+                                                <td className="p-3">
+                                                    {t.role === 'DIRECTOR' ? <span className="bg-orange-100 text-orange-800 px-2 py-0.5 rounded text-xs font-bold">ผู้อำนวยการ</span> : <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded text-xs">คุณครู</span>}
+                                                </td>
                                                 <td className="p-3 text-gray-600">
                                                     <div className="flex flex-wrap gap-1">
                                                     {(!t.gradeLevel || t.gradeLevel === 'ALL') 
@@ -1664,59 +1919,62 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
             {activeTab === 'subjects' && (
                 <div className="max-w-3xl mx-auto">
                     <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Library className="text-pink-500"/> รายวิชาของฉัน</h3>
-                    <div className="bg-pink-50 p-6 rounded-2xl border border-pink-100 mb-6 shadow-sm">
-                        <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><PlusCircle size={18}/> เพิ่มรายวิชาใหม่</h4>
-                        
-                        <div className="grid md:grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อวิชา</label>
-                                <input 
-                                    type="text" 
-                                    value={newSubjectName} 
-                                    onChange={e => setNewSubjectName(e.target.value)} 
-                                    placeholder="เช่น คณิตศาสตร์, สังคมศึกษา" 
-                                    className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-pink-200 outline-none"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">ไอคอนประจำวิชา</label>
-                                <div className="relative">
-                                    <select value={newSubjectIcon} onChange={e => setNewSubjectIcon(e.target.value)} className="w-full p-3 border rounded-xl appearance-none bg-white pr-8 outline-none">
-                                        {SUBJECT_ICONS.map(i => <option key={i.name} value={i.name}>{i.name}</option>)}
-                                    </select>
-                                    <div className="absolute right-3 top-3 text-gray-400 pointer-events-none">
-                                        {SUBJECT_ICONS.find(i=>i.name===newSubjectIcon)?.component}
+                    
+                    {!isDirector && (
+                        <div className="bg-pink-50 p-6 rounded-2xl border border-pink-100 mb-6 shadow-sm">
+                            <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><PlusCircle size={18}/> เพิ่มรายวิชาใหม่</h4>
+                            
+                            <div className="grid md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 block mb-1">ชื่อวิชา</label>
+                                    <input 
+                                        type="text" 
+                                        value={newSubjectName} 
+                                        onChange={e => setNewSubjectName(e.target.value)} 
+                                        placeholder="เช่น คณิตศาสตร์, สังคมศึกษา" 
+                                        className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-pink-200 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 block mb-1">ไอคอนประจำวิชา</label>
+                                    <div className="relative">
+                                        <select value={newSubjectIcon} onChange={e => setNewSubjectIcon(e.target.value)} className="w-full p-3 border rounded-xl appearance-none bg-white pr-8 outline-none">
+                                            {SUBJECT_ICONS.map(i => <option key={i.name} value={i.name}>{i.name}</option>)}
+                                        </select>
+                                        <div className="absolute right-3 top-3 text-gray-400 pointer-events-none">
+                                            {SUBJECT_ICONS.find(i=>i.name===newSubjectIcon)?.component}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="mb-6">
-                            <label className="text-xs font-bold text-gray-500 block mb-2">เลือกสีการ์ด</label>
-                            <div className="flex flex-wrap gap-2">
-                                {CARD_COLORS.map(c => (
-                                    <button 
-                                        key={c.name} 
-                                        onClick={() => setNewSubjectColor(c.class)}
-                                        className={`px-4 py-2 rounded-lg border-2 font-bold text-sm transition-all ${newSubjectColor === c.class ? 'ring-2 ring-pink-400 scale-105 shadow-md ' + c.class : 'bg-white border-gray-200 text-gray-500 opacity-60 hover:opacity-100'}`}
-                                    >
-                                        {c.name}
-                                    </button>
-                                ))}
-                            </div>
-                            {/* Preview */}
-                            <div className={`mt-4 p-4 rounded-xl border-2 flex items-center gap-3 ${newSubjectColor}`}>
-                                <div className="bg-white/50 p-2 rounded-full">
-                                    {SUBJECT_ICONS.find(i=>i.name===newSubjectIcon)?.component}
+                            <div className="mb-6">
+                                <label className="text-xs font-bold text-gray-500 block mb-2">เลือกสีการ์ด</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {CARD_COLORS.map(c => (
+                                        <button 
+                                            key={c.name} 
+                                            onClick={() => setNewSubjectColor(c.class)}
+                                            className={`px-4 py-2 rounded-lg border-2 font-bold text-sm transition-all ${newSubjectColor === c.class ? 'ring-2 ring-pink-400 scale-105 shadow-md ' + c.class : 'bg-white border-gray-200 text-gray-500 opacity-60 hover:opacity-100'}`}
+                                        >
+                                            {c.name}
+                                        </button>
+                                    ))}
                                 </div>
-                                <span className="font-bold">{newSubjectName || 'ตัวอย่างชื่อวิชา'}</span>
+                                {/* Preview */}
+                                <div className={`mt-4 p-4 rounded-xl border-2 flex items-center gap-3 ${newSubjectColor}`}>
+                                    <div className="bg-white/50 p-2 rounded-full">
+                                        {SUBJECT_ICONS.find(i=>i.name===newSubjectIcon)?.component}
+                                    </div>
+                                    <span className="font-bold">{newSubjectName || 'ตัวอย่างชื่อวิชา'}</span>
+                                </div>
                             </div>
-                        </div>
 
-                        <button onClick={handleAddSubject} disabled={!newSubjectName} className="w-full bg-pink-500 text-white py-3 rounded-xl font-bold shadow hover:bg-pink-600 disabled:opacity-50 transition">
-                            บันทึกรายวิชา
-                        </button>
-                    </div>
+                            <button onClick={handleAddSubject} disabled={!newSubjectName} className="w-full bg-pink-500 text-white py-3 rounded-xl font-bold shadow hover:bg-pink-600 disabled:opacity-50 transition">
+                                บันทึกรายวิชา
+                            </button>
+                        </div>
+                    )}
 
                     <div className="space-y-3">
                         <h4 className="font-bold text-gray-700">รายวิชาที่มีอยู่ ({availableSubjects.length})</h4>
@@ -1732,7 +1990,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                             </div>
                                             <span className="font-bold">{s.name}</span>
                                         </div>
-                                        <button onClick={() => handleDeleteSubject(s.id)} className="bg-white/50 hover:bg-white p-2 rounded-lg text-red-500 transition"><Trash2 size={18}/></button>
+                                        {!isDirector && <button onClick={() => handleDeleteSubject(s.id)} className="bg-white/50 hover:bg-white p-2 rounded-lg text-red-500 transition"><Trash2 size={18}/></button>}
                                     </div>
                                 ))}
                             </div>
@@ -1744,28 +2002,30 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
             {/* OTHER TABS (Students, Stats) */}
             {activeTab === 'students' && (
                 <div className="max-w-4xl mx-auto">
-                     <div className={`p-6 rounded-2xl border mb-8 shadow-sm transition-colors ${editingStudentId ? 'bg-orange-50 border-orange-100' : 'bg-purple-50 border-purple-100'}`}>
-                         <h4 className={`font-bold mb-4 flex items-center gap-2 ${editingStudentId ? 'text-orange-800' : 'text-purple-800'}`}>
-                            {editingStudentId ? <><Edit size={20}/> แก้ไขข้อมูลนักเรียน</> : <><UserPlus size={20}/> ลงทะเบียนนักเรียนใหม่</>}
-                         </h4>
-                         <div className="flex flex-col md:flex-row gap-3 mb-4">
-                             <input type="text" value={newStudentName} onChange={e=>setNewStudentName(e.target.value)} className="flex-1 p-3 border rounded-xl bg-white" placeholder="ชื่อ-นามสกุล นักเรียน"/>
-                             <div className="flex gap-1 overflow-x-auto p-1 bg-white border rounded-xl max-w-full md:max-w-[300px]">
-                                 {['👦','👧','🧒','🧑','👓','🦄','🦁','🐼'].map(emoji => (
-                                     <button key={emoji} onClick={()=>setNewStudentAvatar(emoji)} className={`p-2 rounded-lg border-2 transition text-xl ${newStudentAvatar===emoji?'border-purple-500 bg-purple-100 scale-110':'border-transparent hover:bg-gray-100'}`}>{emoji}</button>
-                                 ))}
+                     {!isDirector && (
+                         <div className={`p-6 rounded-2xl border mb-8 shadow-sm transition-colors ${editingStudentId ? 'bg-orange-50 border-orange-100' : 'bg-purple-50 border-purple-100'}`}>
+                             <h4 className={`font-bold mb-4 flex items-center gap-2 ${editingStudentId ? 'text-orange-800' : 'text-purple-800'}`}>
+                                {editingStudentId ? <><Edit size={20}/> แก้ไขข้อมูลนักเรียน</> : <><UserPlus size={20}/> ลงทะเบียนนักเรียนใหม่</>}
+                             </h4>
+                             <div className="flex flex-col md:flex-row gap-3 mb-4">
+                                 <input type="text" value={newStudentName} onChange={e=>setNewStudentName(e.target.value)} className="flex-1 p-3 border rounded-xl bg-white" placeholder="ชื่อ-นามสกุล นักเรียน"/>
+                                 <div className="flex gap-1 overflow-x-auto p-1 bg-white border rounded-xl max-w-full md:max-w-[300px]">
+                                     {['👦','👧','🧒','🧑','👓','🦄','🦁','🐼'].map(emoji => (
+                                         <button key={emoji} onClick={()=>setNewStudentAvatar(emoji)} className={`p-2 rounded-lg border-2 transition text-xl ${newStudentAvatar===emoji?'border-purple-500 bg-purple-100 scale-110':'border-transparent hover:bg-gray-100'}`}>{emoji}</button>
+                                     ))}
+                                 </div>
+                             </div>
+                             <div className="flex gap-2">
+                                 {editingStudentId && (
+                                     <button onClick={handleCancelEdit} className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-300 transition">ยกเลิก</button>
+                                 )}
+                                 <button onClick={handleSaveStudent} disabled={isSaving || !newStudentName} className={`flex-1 text-white py-3 rounded-xl font-bold shadow transition flex items-center justify-center gap-2 ${editingStudentId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-purple-600 hover:bg-purple-700'}`}>
+                                     {isSaving ? <RefreshCw className="animate-spin" /> : <Save size={20} />}
+                                     {isSaving ? 'กำลังบันทึก...' : (editingStudentId ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล')}
+                                 </button>
                              </div>
                          </div>
-                         <div className="flex gap-2">
-                             {editingStudentId && (
-                                 <button onClick={handleCancelEdit} className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-300 transition">ยกเลิก</button>
-                             )}
-                             <button onClick={handleSaveStudent} disabled={isSaving || !newStudentName} className={`flex-1 text-white py-3 rounded-xl font-bold shadow transition flex items-center justify-center gap-2 ${editingStudentId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-purple-600 hover:bg-purple-700'}`}>
-                                 {isSaving ? <RefreshCw className="animate-spin" /> : <Save size={20} />}
-                                 {isSaving ? 'กำลังบันทึก...' : (editingStudentId ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล')}
-                             </button>
-                         </div>
-                     </div>
+                     )}
                      
                      <h4 className="font-bold text-gray-700 mb-2">รายชื่อนักเรียน ({students.length})</h4>
                      <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
@@ -1780,10 +2040,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                  </div>
                                  <div className="flex items-center gap-3">
                                     <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 hidden md:inline-block">{GRADE_LABELS[s.grade || 'P6'] || s.grade}</span>
-                                    <div className="flex gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => handleEditStudent(s)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition" title="แก้ไข"><Edit size={16}/></button>
-                                        <button onClick={() => handleDeleteStudent(s.id)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition" title="ลบ"><Trash2 size={16}/></button>
-                                    </div>
+                                    {!isDirector && (
+                                        <div className="flex gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => handleEditStudent(s)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition" title="แก้ไข"><Edit size={16}/></button>
+                                            <button onClick={() => handleDeleteStudent(s.id)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition" title="ลบ"><Trash2 size={16}/></button>
+                                        </div>
+                                    )}
                                  </div>
                              </div>
                          ))}
