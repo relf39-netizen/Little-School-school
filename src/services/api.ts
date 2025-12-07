@@ -1,5 +1,6 @@
 
-import { Student, Question, Teacher, Subject, ExamResult, Assignment, SubjectConfig, School, RegistrationRequest } from '../types'; 
+
+import { Student, Question, Teacher, Subject, ExamResult, Assignment, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types'; 
 import { db, firebase } from './firebaseConfig'; 
 
 // Helper: Convert Firebase Object to Array
@@ -16,6 +17,52 @@ const snapshotToArray = <T>(snapshot: any): T[] => {
 
 // Helper: Clean String
 const cleanString = (str?: string) => str ? String(str).trim() : '';
+
+// ---------------------------------------------------------------------------
+// 🟢 ANALYTICS & STATS TRACKING (NEW)
+// ---------------------------------------------------------------------------
+
+// Function to increment counters atomically (Performant)
+export const trackSchoolActivity = async (school: string, type: 'login' | 'activity') => {
+    if (!school || school === '-' || school === 'System') return;
+    try {
+        const cleanName = cleanString(school);
+        const statsRef = db.ref(`school_stats/${cleanName}`);
+        
+        // Use transaction for atomic updates to prevent race conditions
+        if (type === 'login') {
+            await statsRef.child('loginCount').transaction((current) => (current || 0) + 1);
+        } else if (type === 'activity') {
+            await statsRef.child('activityCount').transaction((current) => (current || 0) + 1);
+        }
+        
+        // Update last active timestamp
+        await statsRef.child('lastActive').set(firebase.database.ServerValue.TIMESTAMP);
+    } catch (e) {
+        console.error("Tracking error (non-blocking):", e);
+    }
+};
+
+export const getAllSchoolStats = async (): Promise<SchoolStats[]> => {
+    try {
+        const snapshot = await db.ref('school_stats').once('value');
+        if (!snapshot.exists()) return [];
+        
+        const stats: SchoolStats[] = [];
+        snapshot.forEach(child => {
+            const val = child.val();
+            stats.push({
+                schoolName: child.key || 'Unknown',
+                loginCount: val.loginCount || 0,
+                activityCount: val.activityCount || 0,
+                lastActive: val.lastActive || 0
+            });
+        });
+        return stats.sort((a, b) => b.lastActive - a.lastActive); // Sort by most recently active
+    } catch (e) {
+        return [];
+    }
+};
 
 // ---------------------------------------------------------------------------
 // 🟢 LAZY LOAD QUESTIONS
@@ -54,6 +101,8 @@ export const verifyStudentLogin = async (studentId: string): Promise<Student | n
         const snapshot = await db.ref(`students/${studentId}`).once('value');
         if (snapshot.exists()) {
             const data = snapshot.val();
+            // ✅ Track Login
+            if (data.school) trackSchoolActivity(data.school, 'login');
             return { ...data, id: studentId };
         }
         return null;
@@ -181,7 +230,11 @@ export const teacherLogin = async (username: string, password: string): Promise<
     if (snapshot.exists()) {
       const teachers = snapshotToArray<Teacher>(snapshot);
       const teacher = teachers[0];
-      if (teacher && teacher.password === password) return { success: true, teacher };
+      if (teacher && teacher.password === password) {
+          // ✅ Track Teacher Login
+          if(teacher.school) trackSchoolActivity(teacher.school, 'login');
+          return { success: true, teacher };
+      }
     } else {
         if (username === 'admin' && password === '1234') {
              const newAdmin: Teacher = { id: 'admin_root', username: 'admin', password: '1234', name: 'Super Admin', school: 'System', role: 'ADMIN', gradeLevel: 'ALL' };
@@ -369,6 +422,10 @@ export const saveScore = async (studentId: string, studentName: string, school: 
     const newRef = db.ref('results').push();
     await newRef.set({ id: newRef.key, studentId, studentName, school: cleanString(school), score, totalQuestions: total, subject, assignmentId: assignmentId || '-', timestamp: firebase.database.ServerValue.TIMESTAMP });
     db.ref(`students/${studentId}`).child('stars').transaction((currentStars) => (currentStars || 0) + score);
+    
+    // ✅ Track Activity (Activity Count)
+    trackSchoolActivity(school, 'activity');
+    
     return true;
   } catch (e) { return false; }
 }

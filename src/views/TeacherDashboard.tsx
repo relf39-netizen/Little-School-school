@@ -1,8 +1,9 @@
 
+
 import React, { useState, useEffect } from 'react';
-import { Teacher, Student, Assignment, Question, SubjectConfig, School, RegistrationRequest } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, ArrowRight, Users, GraduationCap, Trash2, Edit, UserCog, KeyRound, Sparkles, Wand2, Key, Layers, Library, BrainCircuit, List, Trophy, User, Activity, Building, CreditCard, Search, Loader2, Clock } from 'lucide-react';
-import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration, verifyStudentLogin, getQuestionsBySubject } from '../services/api';
+import { Teacher, Student, Assignment, Question, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types';
+import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, ArrowRight, Users, GraduationCap, Trash2, Edit, UserCog, KeyRound, Sparkles, Wand2, Key, Layers, Library, BrainCircuit, List, Trophy, User, Activity, Building, CreditCard, Search, Loader2, Clock, MonitorSmartphone } from 'lucide-react';
+import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration, verifyStudentLogin, getQuestionsBySubject, getAllSchoolStats } from '../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../services/aiService';
 
 interface TeacherDashboardProps {
@@ -13,7 +14,7 @@ interface TeacherDashboardProps {
 }
 
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, onStartGame, onAdminLoginAsStudent }) => {
-  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'subjects' | 'stats' | 'questions' | 'assignments' | 'teachers' | 'registrations' | 'profile' | 'onet' | 'admin_stats'>('menu');
+  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'subjects' | 'stats' | 'questions' | 'assignments' | 'teachers' | 'registrations' | 'profile' | 'onet' | 'admin_stats' | 'monitor'>('menu');
   
   const [students, setStudents] = useState<Student[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -49,6 +50,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const [pendingRegs, setPendingRegs] = useState<RegistrationRequest[]>([]);
   const [showApproveModal, setShowApproveModal] = useState<RegistrationRequest | null>(null);
   const [approveToSchool, setApproveToSchool] = useState('');
+
+  // ✅ System Monitor Stats (Admin)
+  const [schoolStats, setSchoolStats] = useState<SchoolStats[]>([]);
 
   // Profile Management State
   const [profileName, setProfileName] = useState(teacher.name || '');
@@ -217,6 +221,17 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
       };
       fetchQuestions();
   }, [activeTab, qBankSubject]);
+  
+  // ✅ Fetch School Stats when Admin Monitor tab is active
+  useEffect(() => {
+      const fetchStats = async () => {
+          if (activeTab === 'monitor' && isAdmin) {
+              const data = await getAllSchoolStats();
+              setSchoolStats(data);
+          }
+      }
+      fetchStats();
+  }, [activeTab, isAdmin]);
 
   const loadData = async () => {
     setLoading(true);
@@ -636,6 +651,13 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                   color="bg-red-50 text-red-600 border-red-200" 
                   onClick={() => setActiveTab('registrations')} 
                 />
+                <MenuCard 
+                  icon={<MonitorSmartphone size={40} />} 
+                  title="System Monitor" 
+                  desc="ติดตามการใช้งานระบบ (Admin Only)"
+                  color="bg-slate-700 text-white border-slate-600" 
+                  onClick={() => setActiveTab('monitor')} 
+                />
                 </>
             )}
         </div>
@@ -644,6 +666,58 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
       {activeTab !== 'menu' && (
         <div className="bg-white rounded-3xl shadow-sm p-4 md:p-6 min-h-[400px] relative animate-fade-in">
             <button onClick={() => { setActiveTab('menu'); setEditingStudentId(null); setCreatedStudent(null); setSelectedStudentForStats(null); }} className="mb-6 flex items-center gap-2 text-gray-500 hover:text-purple-600 font-bold transition-colors"><div className="bg-gray-100 p-2 rounded-full"><ArrowLeft size={20} /></div> กลับเมนูหลัก</button>
+            
+            {/* ... [Previous Tabs remain unchanged] ... */}
+            
+            {/* ✅ SYSTEM MONITOR TAB */}
+            {activeTab === 'monitor' && isAdmin && (
+                <div className="max-w-6xl mx-auto">
+                    <div className="flex items-center gap-3 mb-8">
+                        <div className="bg-slate-700 p-3 rounded-full text-white"><MonitorSmartphone size={32}/></div>
+                        <div>
+                            <h3 className="text-2xl font-bold text-gray-800">System Monitor (ระบบติดตามการใช้งาน)</h3>
+                            <p className="text-gray-500">ตรวจสอบปริมาณการใช้งานของแต่ละโรงเรียน (Real-time)</p>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                        <table className="w-full text-left">
+                            <thead className="bg-slate-50 text-slate-700 font-bold">
+                                <tr>
+                                    <th className="p-4">โรงเรียน</th>
+                                    <th className="p-4 text-center">เข้าสู่ระบบ (ครั้ง)</th>
+                                    <th className="p-4 text-center">ทำกิจกรรม (ครั้ง)</th>
+                                    <th className="p-4 text-right">ใช้งานล่าสุด</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {schoolStats.length === 0 ? (
+                                    <tr><td colSpan={4} className="p-10 text-center text-gray-400">ยังไม่มีข้อมูลการใช้งาน</td></tr>
+                                ) : (
+                                    schoolStats.map((stat, idx) => (
+                                        <tr key={idx} className="hover:bg-slate-50">
+                                            <td className="p-4 font-bold text-gray-800">{stat.schoolName}</td>
+                                            <td className="p-4 text-center">
+                                                <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-bold text-sm">
+                                                    {stat.loginCount.toLocaleString()}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                <span className="bg-green-50 text-green-700 px-3 py-1 rounded-full font-bold text-sm">
+                                                    {stat.activityCount.toLocaleString()}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-right text-sm text-gray-500 font-mono">
+                                                {stat.lastActive ? new Date(stat.lastActive).toLocaleString('th-TH') : '-'}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
             
             {/* O-NET TAB */}
             {activeTab === 'onet' && (
@@ -1563,7 +1637,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 </div>
             )}
 
-            {/* OTHER TABS (Students, Stats) */}
+            {/* STUDENTS TAB */}
             {activeTab === 'students' && (
                 <div className="max-w-4xl mx-auto">
                      {!isDirector && (

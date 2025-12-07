@@ -1,4 +1,5 @@
 
+
 export interface Student {
   id: string;
   name: string;
@@ -24,6 +25,14 @@ export interface Teacher {
 export interface School {
   id: string;
   name: string;
+}
+
+// ✅ New Interface for School Statistics
+export interface SchoolStats {
+  schoolName: string;
+  loginCount: number;
+  activityCount: number; // Represents quizzes/exams taken
+  lastActive: number;
 }
 
 // ✅ Changed from Enum to string to support dynamic subjects
