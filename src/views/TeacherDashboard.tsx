@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Teacher, Student, Assignment, Question, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, ArrowRight, Users, GraduationCap, Trash2, Edit, UserCog, KeyRound, Sparkles, Wand2, Key, List, Trophy, User, Building, CreditCard, Search, Loader2, Clock, MonitorSmartphone, Database, UploadCloud, AlertTriangle, ToggleLeft, ToggleRight, PenTool, BrainCircuit } from 'lucide-react';
+import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, ArrowRight, Users, GraduationCap, Trash2, Edit, UserCog, KeyRound, Sparkles, Wand2, Key, List, Trophy, User, Building, CreditCard, Search, Loader2, Clock, MonitorSmartphone, Database, UploadCloud, AlertTriangle, ToggleLeft, ToggleRight, BrainCircuit, Crown } from 'lucide-react';
 import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration, verifyStudentLogin, getQuestionsBySubject, getAllSchoolStats } from '../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../services/aiService';
 import { supabase } from '../services/firebaseConfig';
@@ -311,7 +311,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   };
   
   const getStudentOverallStats = (studentId: string) => {
-    const studentResults = stats.filter(r => String(r.studentId) === String(studentId));
+    // 🟢 Exclude Game Mode from Student Average
+    const studentResults = stats.filter(r => String(r.studentId) === String(studentId) && r.subject !== 'GAME_MODE');
     const attempts = studentResults.length;
     let average = 0;
     if (attempts > 0) {
@@ -341,58 +342,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         if (isNaN(avg) || !isFinite(avg)) avg = 0;
         return { ...s, average: avg };
     });
-  };
-
-  const getGradeStats = (grade: string) => {
-      const gradeStudents = students.filter(s => s.grade === grade);
-      const studentIds = gradeStudents.map(s => s.id);
-      const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)));
-      
-      let totalScorePercent = 0; 
-      let count = 0;
-      
-      // ✅ 1. Identify ALL Subjects for this grade (from Available Subjects + Results)
-      const distinctSubjects = new Set<string>();
-      // Add from available subjects for this grade
-      availableSubjects.forEach(s => {
-          if (s.grade === 'ALL' || s.grade === grade) distinctSubjects.add(s.name);
-      });
-      // Add from actual results (legacy coverage)
-      gradeResults.forEach(r => distinctSubjects.add(r.subject));
-
-      const subjectMap: Record<string, { sumPct: number, count: number }> = {};
-      // Initialize map for all distinct subjects
-      distinctSubjects.forEach(sub => { subjectMap[sub] = { sumPct: 0, count: 0 }; });
-
-      gradeResults.forEach(r => {
-          const totalQ = Number(r.totalQuestions); 
-          const score = Number(r.score) || 0;
-          if (totalQ > 0) { 
-              const pct = (score / totalQ) * 100;
-              totalScorePercent += pct; 
-              count++; 
-              
-              if(subjectMap[r.subject]) {
-                  subjectMap[r.subject].sumPct += pct;
-                  subjectMap[r.subject].count++;
-              }
-          }
-      });
-      
-      const avg = count > 0 ? Math.round(totalScorePercent / count) : 0;
-      
-      const subjectStats = Object.keys(subjectMap).map(sub => ({
-          name: sub,
-          avg: subjectMap[sub].count > 0 ? Math.round(subjectMap[sub].sumPct / subjectMap[sub].count) : 0,
-          hasData: subjectMap[sub].count > 0
-      })).sort((a,b) => {
-          // Sort logic: Data first, then score
-          if (a.hasData && !b.hasData) return -1;
-          if (!a.hasData && b.hasData) return 1;
-          return b.avg - a.avg;
-      });
-
-      return { studentCount: gradeStudents.length, avgScore: avg, activityCount: count, subjectStats };
   };
 
   const handleImpersonate = async () => {
@@ -483,96 +432,219 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
      }
   };
 
-  // ✅ Migration Handler
+  // ✅ ENHANCED MIGRATION HANDLER with UUID mapping & Validations
   const handleMigration = async () => {
       if (!migrationFile) return alert("กรุณาเลือกไฟล์ JSON");
       setIsMigrating(true);
       const logs: string[] = [];
       const log = (msg: string) => { logs.push(msg); setMigrationLog([...logs]); };
       
+      const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+      const getUUID = (str: string) => isUUID(str) ? str : crypto.randomUUID();
+      const cleanSchool = (s: string) => s ? s.trim() : 'CENTER';
+      
+      const idMap: Record<string, string> = {}; // Old ID -> New UUID
+      const validStudentIds = new Set<string>(); // Keep track of valid students
+
       try {
           const text = await migrationFile.text();
           const json = JSON.parse(text);
-          
           log(`Loaded file: ${migrationFile.name}`);
           
-          // Determine structure
-          let dataToImport: any[] = [];
-          let targetTable = migrationTarget;
-
-          // Helper to normalize Firebase object to array
-          const toArray = (obj: any) => {
-             if (Array.isArray(obj)) return obj.filter(x => x);
-             return Object.keys(obj).map(key => ({ id: key, ...obj[key] }));
-          };
-
           if (migrationTarget === 'auto') {
-              // Try to detect root keys
-              if (json.students) {
-                  log("Detected 'students' node. Importing students...");
-                  const rows = toArray(json.students);
-                  const { error } = await supabase.from('students').upsert(rows);
-                  if(error) log(`Error importing students: ${error.message}`);
-                  else log(`✅ Imported ${rows.length} students.`);
+              // 1. EXTRACT SCHOOLS
+              const schoolsToInsert = new Set<string>();
+              const users = json.users || json.students || {};
+              Object.values(users).forEach((u: any) => { if(u && u.school) schoolsToInsert.add(cleanSchool(u.school)); });
+              const teachers = json.teachers || {};
+              Object.values(teachers).forEach((t: any) => { if(t && t.school) schoolsToInsert.add(cleanSchool(t.school)); });
+
+              log(`Found ${schoolsToInsert.size} unique schools.`);
+              for (const schoolName of schoolsToInsert) {
+                  const { error } = await supabase.from('schools').upsert({ name: schoolName, status: 'active' }, { onConflict: 'name' });
+                  if(error) log(`Warning: Could not insert school ${schoolName}: ${error.message}`);
               }
+              log("✅ Schools synced.");
+
+              // 2. IMPORT TEACHERS
               if (json.teachers) {
-                  log("Detected 'teachers' node. Importing teachers...");
-                  const rows = toArray(json.teachers);
-                  const { error } = await supabase.from('teachers').upsert(rows);
+                  log("Importing teachers...");
+                  const teacherRows = Object.values(json.teachers).map((t: any) => ({
+                      username: t.username,
+                      password: t.password,
+                      name: t.name,
+                      school: cleanSchool(t.school),
+                      role: t.role || 'TEACHER',
+                      grade_level: t.gradeLevel || t.grade_level || 'ALL'
+                  })).filter((t: any) => t.username);
+
+                  const { error } = await supabase.from('teachers').upsert(teacherRows, { onConflict: 'username' });
                   if(error) log(`Error importing teachers: ${error.message}`);
-                  else log(`✅ Imported ${rows.length} teachers.`);
+                  else log(`✅ Imported ${teacherRows.length} teachers.`);
               }
+
+              // 3. IMPORT STUDENTS
+              const studentsNode = json.users || json.students;
+              if (studentsNode) {
+                  log("Importing students...");
+                  const studentRows = Object.keys(studentsNode).map((key) => {
+                      const s = studentsNode[key];
+                      const sid = s.id || (String(key).match(/^\d+$/) ? key : undefined);
+                      if (!sid) return null;
+                      
+                      // Normalize ID
+                      const finalId = String(sid).trim();
+                      validStudentIds.add(finalId); // Add to valid set
+
+                      return {
+                          id: finalId,
+                          name: s.name,
+                          school: cleanSchool(s.school),
+                          avatar: s.avatar || '👦',
+                          stars: s.stars || 0,
+                          grade: s.grade || 'P6',
+                          quiz_count: s.quizCount || 0,
+                          level: s.level || 1,
+                          tokens: s.tokens || 0
+                      };
+                  }).filter(s => s !== null);
+
+                  const BATCH_SIZE = 200;
+                  for (let i = 0; i < studentRows.length; i += BATCH_SIZE) {
+                      const batch = studentRows.slice(i, i + BATCH_SIZE);
+                      const { error } = await supabase.from('students').upsert(batch);
+                      if(error) log(`Error batch ${i}: ${error.message}`);
+                  }
+                  log(`✅ Imported ${studentRows.length} students.`);
+              }
+
+              // 4. IMPORT QUESTIONS
               if (json.questions) {
-                  log("Detected 'questions' node. Importing questions...");
-                  // Need to fix choices structure if from old system
-                  let rows = toArray(json.questions);
-                  // Normalize fields
-                  rows = rows.map((q: any) => ({
-                      id: q.id,
-                      subject: q.subject,
-                      text: q.text,
-                      grade: q.grade || 'P6',
-                      // Fix choices: convert array of objects to simple jsonb if needed, or keep as is if compatible
-                      choices: JSON.stringify(q.choices), 
-                      correct_choice_id: q.correctChoiceId,
-                      explanation: q.explanation,
-                      school: q.school,
-                      teacher_id: q.teacherId
-                  }));
+                  log("Importing questions...");
+                  const qRows = Object.values(json.questions).map((q: any) => {
+                      const newId = getUUID(q.id);
+                      idMap[q.id] = newId; 
 
-                  const { error } = await supabase.from('questions').upsert(rows);
+                      return {
+                          id: newId,
+                          subject: q.subject,
+                          text: q.text,
+                          image: q.image,
+                          choices: typeof q.choices === 'string' ? q.choices : JSON.stringify(q.choices),
+                          correct_choice_id: q.correctChoiceId || q.correct_choice_id || q.correct,
+                          explanation: q.explanation,
+                          grade: q.grade || 'P6',
+                          school: cleanSchool(q.school), 
+                          teacher_id: q.teacherId 
+                      };
+                  });
+                  
+                  const { error } = await supabase.from('questions').upsert(qRows, { ignoreDuplicates: true });
                   if(error) log(`Error importing questions: ${error.message}`);
-                  else log(`✅ Imported ${rows.length} questions.`);
+                  else log(`✅ Imported ${qRows.length} questions.`);
               }
-          } else {
-               // Specific table import
-               log(`Importing into '${migrationTarget}'...`);
-               let rows = toArray(json); // Assume the file IS the data for that table
-               
-               // Adjust fields based on target
-               if (migrationTarget === 'questions') {
-                    rows = rows.map((q: any) => ({
-                      id: q.id,
-                      subject: q.subject,
-                      text: q.text,
-                      grade: q.grade || 'P6',
-                      choices: typeof q.choices === 'object' ? JSON.stringify(q.choices) : q.choices, 
-                      correct_choice_id: q.correctChoiceId || q.correct_choice_id,
-                      explanation: q.explanation,
-                      school: q.school,
-                      teacher_id: q.teacherId || q.teacher_id
-                   }));
-               }
-               
-               const { error } = await supabase.from(migrationTarget).upsert(rows);
-               if(error) throw error;
-               log(`✅ Imported ${rows.length} rows into ${migrationTarget}.`);
-          }
-          
-          log("Migration Completed.");
 
+              // 5. IMPORT ASSIGNMENTS
+              if (json.assignments) {
+                  log("Importing assignments...");
+                  const aRows = Object.values(json.assignments).map((a: any) => {
+                      const newId = getUUID(a.id);
+                      idMap[a.id] = newId;
+
+                      return {
+                          id: newId,
+                          school: cleanSchool(a.school || a.schoolName),
+                          subject: a.subject,
+                          grade: a.grade || 'ALL',
+                          question_count: a.questionCount || 10,
+                          deadline: a.deadline,
+                          created_by: a.createdBy || 'Admin',
+                          title: a.title
+                      };
+                  });
+                  
+                  const { error } = await supabase.from('assignments').upsert(aRows, { ignoreDuplicates: true });
+                  if(error) log(`Error importing assignments: ${error.message}`);
+                  else log(`✅ Imported ${aRows.length} assignments.`);
+              }
+
+              // 6. IMPORT EXAM RESULTS (Fix Logic)
+              const resultsNode = json.results || json.examResults || json.exam_results;
+              if (resultsNode) {
+                  log("Importing exam results...");
+                  const rRows = Object.values(resultsNode).map((r: any) => {
+                      const oldAssignId = r.assignmentId !== '-' ? r.assignmentId : null;
+                      // Try to map ID, if fail, keep as null (don't skip result!)
+                      let newAssignId = null;
+                      if (oldAssignId) {
+                          if (idMap[oldAssignId]) newAssignId = idMap[oldAssignId];
+                          else if (isUUID(oldAssignId)) newAssignId = oldAssignId;
+                      }
+                      
+                      // Validate Student ID (Must exist in students table)
+                      const stId = String(r.studentId || r.student_id).trim();
+                      if (!validStudentIds.has(stId)) {
+                          // Skip if student doesn't exist to prevent FK error
+                          return null;
+                      }
+
+                      return {
+                          id: getUUID(r.id), 
+                          student_id: stId,
+                          student_name: r.studentName,
+                          school: cleanSchool(r.school),
+                          score: r.score,
+                          total_questions: r.totalQuestions || r.total,
+                          subject: r.subject,
+                          assignment_id: newAssignId, // Can be null
+                          timestamp: r.timestamp || Date.now()
+                      };
+                  }).filter(r => r !== null);
+                  
+                  const BATCH_SIZE = 100;
+                  let successCount = 0;
+                  for (let i = 0; i < rRows.length; i += BATCH_SIZE) {
+                      const batch = rRows.slice(i, i + BATCH_SIZE);
+                      const { error } = await supabase.from('exam_results').upsert(batch, { ignoreDuplicates: true });
+                      if(error) log(`Error results batch ${i}: ${error.message}`);
+                      else successCount += batch.length;
+                  }
+                  log(`✅ Imported ${successCount} exam results.`);
+              }
+
+              // 7. INFER & IMPORT SUBJECTS
+              log("Inferring subjects from data...");
+              const subjectSet = new Set<string>(); // Format: "SchoolName|SubjectName"
+              const addSub = (school: string, subject: string) => {
+                  if(school && subject) subjectSet.add(`${cleanSchool(school)}|${subject}`);
+              }
+              if (json.questions) Object.values(json.questions).forEach((q: any) => addSub(q.school, q.subject));
+              if (json.assignments) Object.values(json.assignments).forEach((a: any) => addSub(a.school || a.schoolName, a.subject));
+
+              log(`Found ${subjectSet.size} unique school-subject pairs.`);
+              const subjectRows = Array.from(subjectSet).map(item => {
+                  const [school, name] = item.split('|');
+                  const safeId = `${school}_${name}`.replace(/[^a-zA-Z0-9_]/g, '_');
+                  return { id: safeId, name: name, school: school, teacher_id: normalizeId(teacher.id), grade: 'ALL', icon: 'Book', color: 'bg-white border-gray-200' };
+              });
+
+              // Deduplicate
+              const uniqueSubjectMap = new Map();
+              subjectRows.forEach(row => { if (!uniqueSubjectMap.has(row.id)) uniqueSubjectMap.set(row.id, row); });
+              const finalSubjectRows = Array.from(uniqueSubjectMap.values());
+
+              if (finalSubjectRows.length > 0) {
+                  const { error } = await supabase.from('subjects').upsert(finalSubjectRows, { onConflict: 'id' });
+                  if (error) log(`Error importing subjects: ${error.message}`);
+                  else log(`✅ Imported ${finalSubjectRows.length} subjects.`);
+              }
+
+          } else {
+               log("Manual mode not supported. Use Auto.");
+          }
+          log("Migration process finished.");
       } catch (e: any) {
-          log(`❌ Error: ${e.message}`);
+          log(`❌ Fatal Error: ${e.message}`);
           console.error(e);
       } finally {
           setIsMigrating(false);
@@ -973,7 +1045,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         <div className="bg-white rounded-3xl shadow-sm p-4 md:p-6 min-h-[400px] relative animate-fade-in">
             <button onClick={() => { setActiveTab('menu'); setEditingStudentId(null); setCreatedStudent(null); setSelectedStudentForStats(null); setViewLevel('GRADES'); setSelectedGradeFilter(null); }} className="mb-6 flex items-center gap-2 text-gray-500 hover:text-purple-600 font-bold transition-colors"><div className="bg-gray-100 p-2 rounded-full"><ArrowLeft size={20} /></div> กลับเมนูหลัก</button>
             
-            {/* STUDENTS TAB - Navigation for Multi-Grade Teachers */}
+            {/* STUDENTS TAB - Navigation for Multi-Grade Views */}
             {activeTab === 'students' && viewLevel === 'GRADES' && (
                 <div className="animate-fade-in">
                     <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><UserPlus className="text-purple-600"/> เลือกชั้นเรียน (จัดการนักเรียน)</h3>
@@ -998,8 +1070,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 </div>
             )}
             
-            {/* ... Other Tabs (Students List, Subjects, Stats, etc.) - Preserving structure ... */}
-
             {/* MIGRATION TAB */}
             {activeTab === 'migration' && isAdmin && (
                 <div className="max-w-4xl mx-auto">
@@ -1015,8 +1085,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                     <option value="students">👨‍🎓 นักเรียน (Students)</option>
                                     <option value="teachers">👩‍🏫 ครู/บุคลากร (Teachers)</option>
                                     <option value="questions">📝 ข้อสอบ (Questions)</option>
-                                    <option value="schools">🏫 โรงเรียน (Schools)</option>
-                                    <option value="subjects">📚 วิชา (Subjects)</option>
                                 </select>
 
                                 <label className="block text-sm font-bold text-gray-700 mb-2">2. เลือกไฟล์ JSON</label>
@@ -1039,7 +1107,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             <div className="flex flex-col justify-end">
                                 <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-xs text-yellow-800 mb-4">
                                     <strong className="flex items-center gap-1 mb-1"><AlertTriangle size={14}/> คำเตือน:</strong>
-                                    ข้อมูลที่มี ID ซ้ำกันจะถูกเขียนทับ (Upsert) กรุณาตรวจสอบความถูกต้องก่อนนำเข้า
+                                    ระบบจะค้นหาชื่อโรงเรียนจากข้อมูลและสร้างให้อัตโนมัติ ข้อมูลที่มี ID ซ้ำกันจะถูกเขียนทับ
                                 </div>
                                 <button 
                                     onClick={handleMigration}
@@ -1210,6 +1278,29 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                         {(canManageAll ? GRADES : myGrades).map(g => {
+                            // ✅ Exclude Game Mode stats here
+                            const getGradeStats = (grade: string) => {
+                                const gradeStudents = students.filter(s => s.grade === grade);
+                                const studentIds = gradeStudents.map(s => s.id);
+                                const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)) && r.subject !== 'GAME_MODE');
+                                
+                                let totalScorePercent = 0; 
+                                let count = 0;
+                                
+                                gradeResults.forEach(r => {
+                                    const totalQ = Number(r.totalQuestions); 
+                                    const score = Number(r.score) || 0;
+                                    if (totalQ > 0) { 
+                                        const pct = (score / totalQ) * 100;
+                                        totalScorePercent += pct; 
+                                        count++; 
+                                    }
+                                });
+                                
+                                const avg = count > 0 ? Math.round(totalScorePercent / count) : 0;
+                                return { studentCount: gradeStudents.length, avgScore: avg, activityCount: count };
+                            };
+
                             const gStats = getGradeStats(g);
                             if (gStats.studentCount === 0) return null;
                             return (
@@ -1717,7 +1808,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                  const getGradeStats = (grade: string) => {
                                       const gradeStudents = students.filter(s => s.grade === grade);
                                       const studentIds = gradeStudents.map(s => s.id);
-                                      const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)));
+                                      
+                                      // 🟢 Exclude GAME_MODE results here
+                                      const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)) && r.subject !== 'GAME_MODE');
                                       
                                       let totalScorePercent = 0; 
                                       let count = 0;
@@ -1759,12 +1852,35 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                           return b.avg - a.avg;
                                       });
 
-                                      return { studentCount: gradeStudents.length, avgScore: avg, activityCount: count, subjectStats };
+                                      // 🟢 O-NET Specific Stats (Breakdown by 4 Subjects)
+                                      let onetBreakdown: {subject: string, score: number}[] = [];
+                                      if (grade === 'P6' || grade === 'M3') {
+                                          onetBreakdown = ONET_SUBJECTS.map(subj => {
+                                              let subSum = 0;
+                                              let subCount = 0;
+                                              // Filter results that belong to assignments with title starting with [O-NET]
+                                              gradeResults.forEach(r => {
+                                                  if (r.subject !== subj) return;
+                                                  const assignment = assignments.find(a => a.id === r.assignmentId);
+                                                  if (assignment && assignment.title?.startsWith('[O-NET]')) {
+                                                       const totalQ = Number(r.totalQuestions);
+                                                       const score = Number(r.score) || 0;
+                                                       if (totalQ > 0) {
+                                                           subSum += (score / totalQ) * 100;
+                                                           subCount++;
+                                                       }
+                                                  }
+                                              });
+                                              return { subject: subj, score: subCount > 0 ? Math.round(subSum / subCount) : 0 };
+                                          });
+                                      }
+
+                                      return { studentCount: gradeStudents.length, avgScore: avg, activityCount: count, subjectStats, onetBreakdown };
                                   };
 
                                  const gStats = getGradeStats(g);
                                  return (
-                                    <button key={g} onClick={() => { setSelectedGradeFilter(g); setViewLevel('LIST'); }} className="bg-white hover:bg-orange-50 p-6 rounded-2xl border border-gray-100 shadow-sm transition-all hover:border-orange-200 text-left group">
+                                    <button key={g} onClick={() => { setSelectedGradeFilter(g); setViewLevel('LIST'); }} className="bg-white hover:bg-orange-50 p-6 rounded-2xl border border-gray-100 shadow-sm transition-all hover:border-orange-200 text-left group h-full flex flex-col relative overflow-hidden">
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="bg-orange-50 p-2 rounded-lg text-orange-600 group-hover:bg-white"><GraduationCap size={24}/></div>
                                             <span className="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{GRADE_LABELS[g]}</span>
@@ -1772,9 +1888,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                         <div className="text-2xl font-black text-gray-800 mb-1">{gStats.avgScore}%</div>
                                         <div className="text-sm text-gray-500">คะแนนเฉลี่ยรวม</div>
 
-                                        {/* Detailed Subject Breakdown with Visual Progress Bars */}
-                                        {gStats.subjectStats.length > 0 && (
-                                            <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                                        {/* Detailed Subject Breakdown with Scroll */}
+                                        <div className="mt-4 pt-4 border-t border-gray-100 space-y-3 flex-1 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
                                                 {gStats.subjectStats.map((s, idx) => {
                                                     // Color Logic
                                                     let barColor = 'bg-gray-200';
@@ -1796,17 +1911,30 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                                                 <span className={`font-medium truncate pr-2 ${s.hasData ? 'text-gray-700' : 'text-gray-400'}`}>{s.name}</span>
                                                                 <span className={`font-bold ${textColor}`}>{s.hasData ? `${s.avg}%` : 'N/A'}</span>
                                                             </div>
-                                                            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden shadow-inner">
+                                                            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden shadow-inner">
                                                                 <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${s.hasData ? width : 0}%` }}></div>
                                                             </div>
                                                         </div>
                                                     );
                                                 })}
+                                        </div>
+                                        
+                                        {/* 🟢 O-NET Specific Display Grid */}
+                                        {gStats.onetBreakdown.length > 0 && (
+                                            <div className="mt-3 bg-indigo-50 p-2 rounded-lg border border-indigo-100">
+                                                <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 mb-1"><Crown size={12}/> ผลการทดสอบ O-NET (จำลอง)</div>
+                                                <div className="grid grid-cols-2 gap-1">
+                                                    {gStats.onetBreakdown.map(o => (
+                                                        <div key={o.subject} className={`text-[10px] px-1 py-0.5 rounded text-center border ${o.score >= 50 ? 'bg-white border-indigo-200 text-indigo-900' : 'bg-red-50 border-red-100 text-red-500'}`}>
+                                                            {o.subject.substring(0, 4)}.. <b>{o.score}</b>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         )}
                                         
-                                        <div className="mt-4 pt-4 border-t border-dashed border-gray-100 flex justify-between text-xs font-medium text-gray-400">
-                                            <span>นักเรียน {gStats.studentCount} คน</span>
+                                        <div className="mt-3 pt-2 border-t border-dashed border-gray-100 flex justify-between text-[10px] font-medium text-gray-400">
+                                            <span>นร. {gStats.studentCount}</span>
                                             <span>กิจกรรม {gStats.activityCount}</span>
                                         </div>
                                     </button>

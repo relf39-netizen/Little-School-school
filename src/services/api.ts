@@ -1,387 +1,359 @@
 
-import { Student, Question, Teacher, ExamResult, Assignment, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types'; 
-import { supabase } from './firebaseConfig'; 
+import { Student, Question, Teacher, Subject, ExamResult, Assignment, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types'; 
+import { MOCK_STUDENTS, MOCK_QUESTIONS } from '../constants';
+import { supabase } from './firebaseConfig';
 
-// Helper: Clean String
-const cleanString = (str?: string) => str ? String(str).trim() : '';
-
-// ---------------------------------------------------------------------------
-// 🟢 UTILS & HELPERS
-// ---------------------------------------------------------------------------
-
-export const checkSchoolStatus = async (schoolName: string): Promise<boolean> => {
-    if (!schoolName || schoolName === 'System') return true;
-    try {
-        const { data, error } = await supabase
-            .from('schools')
-            .select('status')
-            .eq('name', schoolName)
-            .maybeSingle();
-            
-        if (error || !data) return true; 
-        return data.status !== 'inactive';
-    } catch (e) {
-        return true; 
-    }
+export interface AppData {
+  students: Student[];
+  questions: Question[];
+  results: ExamResult[];
+  assignments: Assignment[];
+  subjects: SubjectConfig[];
 }
 
-// ---------------------------------------------------------------------------
-// 🟢 ANALYTICS & STATS
-// ---------------------------------------------------------------------------
-
-export const getAllSchoolStats = async (): Promise<SchoolStats[]> => {
-    // ใน Supabase การทำ Aggregation แบบ Complex อาจต้องใช้ RPC หรือ View
-    // เพื่อความง่ายใน Demo นี้ เราจะ Mock ค่าว่างไว้ก่อน หรือดึงข้อมูลดิบมานับ
-    // (Recommended: สร้าง View ใน SQL แล้ว Select จาก View นั้น)
-    return [];
+// 🔄 Helper to normalize subject
+const normalizeSubject = (rawSubject: string): Subject => {
+  const s = String(rawSubject).trim().toUpperCase();
+  if (s === 'MATH' || s === 'คณิตศาสตร์' || s === 'คณิต') return 'คณิตศาสตร์';
+  if (s === 'THAI' || s === 'ภาษาไทย' || s === 'ไทย') return 'ภาษาไทย';
+  if (s === 'SCIENCE' || s === 'วิทยาศาสตร์' || s === 'วิทย์') return 'วิทยาศาสตร์';
+  if (s === 'ENGLISH' || s === 'ภาษาอังกฤษ' || s === 'อังกฤษ') return 'ภาษาอังกฤษ';
+  return rawSubject; // Return as is for dynamic subjects
 };
 
-// ---------------------------------------------------------------------------
-// 🟢 DATA FETCHING
-// ---------------------------------------------------------------------------
-
-export const getQuestionsBySubject = async (subject: string): Promise<Question[]> => {
-    try {
-        const { data, error } = await supabase
-            .from('questions')
-            .select('*')
-            .eq('subject', subject);
-        
-        if (error) throw error;
-
-        return (data || []).map((q: any) => ({
-            ...q,
-            choices: typeof q.choices === 'string' ? JSON.parse(q.choices) : q.choices,
-            correctChoiceId: q.correct_choice_id
-        }));
-    } catch (e) {
-        console.error("Error fetching questions", e);
-        return [];
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 🟢 STUDENT LOGIN & DATA
-// ---------------------------------------------------------------------------
-
-export const verifyStudentLogin = async (studentId: string): Promise<{ student: Student | null, error?: string }> => {
-    try {
-        const { data, error } = await supabase
-            .from('students')
-            .select('*')
-            .eq('id', studentId)
-            .single();
-
-        if (error || !data) return { student: null, error: 'ไม่พบข้อมูลรหัสนักเรียนนี้' };
-            
-        // Check School Status
-        if (data.school) {
-            const isActive = await checkSchoolStatus(data.school);
-            if (!isActive) return { student: null, error: 'โรงเรียนถูกระงับการใช้งาน' };
-        }
-
-        const student: Student = { 
-            ...data, 
-            id: String(data.id),
-            quizCount: data.quiz_count || 0,
-            tokens: data.tokens || 0,
-            level: data.level || 1,
-            inventory: data.inventory || []
-        };
-        return { student };
-    } catch (error) {
-        console.error("Login failed:", error);
-        return { student: null, error: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' };
-    }
-};
-
-export const getDataForStudent = async (student: Student): Promise<{
-    questions: Question[],
-    results: ExamResult[],
-    assignments: Assignment[],
-    subjects: SubjectConfig[]
-}> => {
-    try {
-        const cleanSchool = cleanString(student.school);
-        
-        const [resultsRes, assignmentsRes, subjectsRes] = await Promise.all([
-            supabase.from('exam_results').select('*').eq('student_id', student.id),
-            supabase.from('assignments').select('*').eq('school', cleanSchool),
-            supabase.from('subjects').select('*').eq('school', cleanSchool)
-        ]);
-
-        const results = (resultsRes.data || []).map((r: any) => ({
-            ...r,
-            studentId: r.student_id,
-            totalQuestions: r.total_questions,
-            assignmentId: r.assignment_id
-        }));
-
-        const assignments = (assignmentsRes.data || []).map((a: any) => ({
-            ...a,
-            questionCount: a.question_count,
-            createdBy: a.created_by
-        }));
-        
-        const subjects = (subjectsRes.data || []).map((s: any) => ({
-            ...s,
-            teacherId: s.teacher_id
-        }));
-
-        return { questions: [], results, assignments, subjects };
-
-    } catch (error) {
-        console.error("Error fetching student data:", error);
-        return { questions: [], results: [], assignments: [], subjects: [] };
-    }
-};
-
-// ---------------------------------------------------------------------------
-// 🟢 SCHOOLS & SUBJECTS
-// ---------------------------------------------------------------------------
-
-export const getSchools = async (): Promise<School[]> => {
-  const { data } = await supabase.from('schools').select('*');
-  return data || [];
-};
-
-export const manageSchool = async (data: { action: 'add' | 'edit' | 'delete', name?: string, id?: string, status?: 'active' | 'inactive' }): Promise<boolean> => {
-  try {
-    if (data.action === 'add' && data.name) {
-      const { error } = await supabase.from('schools').insert([{ id: Date.now().toString(), name: data.name, status: 'active' }]);
-      return !error;
-    } else if (data.action === 'edit' && data.id) {
-      const { error } = await supabase.from('schools').update({ status: data.status }).eq('id', data.id);
-      return !error;
-    } else if (data.action === 'delete' && data.id) {
-      const { error } = await supabase.from('schools').delete().eq('id', data.id);
-      return !error;
-    }
-    return false;
-  } catch { return false; }
-};
-
-export const getSubjects = async (school: string): Promise<SubjectConfig[]> => {
-  const { data } = await supabase.from('subjects').select('*').eq('school', school);
-  return (data || []).map((s: any) => ({ ...s, teacherId: s.teacher_id }));
-};
-
-export const addSubject = async (school: string, subject: SubjectConfig): Promise<boolean> => {
-  const { error } = await supabase.from('subjects').insert([{
-        id: subject.id,
-        name: subject.name,
-        school: school,
-        teacher_id: subject.teacherId,
-        grade: subject.grade,
-        icon: subject.icon,
-        color: subject.color
-  }]);
-  return !error;
-};
-
-export const deleteSubject = async (school: string, subjectId: string): Promise<boolean> => {
-  const { error } = await supabase.from('subjects').delete().eq('id', subjectId);
-  return !error;
-};
-
-// ---------------------------------------------------------------------------
-// 🟢 TEACHERS
-// ---------------------------------------------------------------------------
-
+// Login ครู
 export const teacherLogin = async (username: string, password: string): Promise<{success: boolean, teacher?: Teacher, message?: string}> => {
   try {
-    const { data, error } = await supabase.from('teachers').select('*').eq('username', username).maybeSingle();
+    const { data, error } = await supabase
+      .from('teachers')
+      .select('*')
+      .eq('username', username)
+      .eq('password', password)
+      .single();
+
+    if (error || !data) return { success: false, message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
     
-    if (data && data.password === password) {
-          if(data.school && data.school !== 'System') {
-             const isSchoolActive = await checkSchoolStatus(data.school);
-             if(!isSchoolActive) {
-                 return { success: false, message: 'โรงเรียนถูกระงับการใช้งาน' };
-             }
-          }
-          const teacher: Teacher = { ...data, gradeLevel: data.grade_level };
-          return { success: true, teacher };
+    // Check school status
+    if (data.school) {
+        const { data: school } = await supabase.from('schools').select('status').eq('name', data.school).single();
+        if (school && school.status === 'inactive') {
+            return { success: false, message: 'โรงเรียนถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
+        }
     }
-    return { success: false, message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
-  } catch { return { success: false, message: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' }; }
+
+    return { success: true, teacher: data as Teacher };
+  } catch (e) {
+    console.error("Login error", e);
+    return { success: false, message: 'Connection Error' };
+  }
+};
+
+// Verify Student Login
+export const verifyStudentLogin = async (code: string): Promise<{student?: Student, error?: string}> => {
+  try {
+    const { data, error } = await supabase
+      .from('students')
+      .select('*')
+      .eq('id', code)
+      .single();
+    
+    if (error || !data) return { error: 'ไม่พบข้อมูลนักเรียน' };
+    
+    // Check school status
+    if (data.school) {
+        const { data: school } = await supabase.from('schools').select('status').eq('name', data.school).single();
+        if (school && school.status === 'inactive') {
+            return { error: 'โรงเรียนถูกระงับการใช้งาน' };
+        }
+    }
+
+    return { student: data as Student };
+  } catch (e) {
+    return { error: 'Connection Error' };
+  }
+};
+
+// Request Registration
+export const requestRegistration = async (citizenId: string, name: string, surname: string): Promise<{success: boolean, message: string}> => {
+    try {
+        const { error } = await supabase.from('registration_requests').insert({
+            citizen_id: citizenId, name, surname, timestamp: Date.now(), status: 'pending'
+        });
+        if (error) throw error;
+        return { success: true, message: 'ส่งคำขอเรียบร้อย รอการอนุมัติ' };
+    } catch (e) {
+        return { success: false, message: 'เกิดข้อผิดพลาด หรือเลขบัตรนี้มีในระบบแล้ว' };
+    }
+};
+
+// ดึงข้อมูล Dashboard ครู
+export const getTeacherDashboard = async (school: string) => {
+  try {
+    const { data: students } = await supabase.from('students').select('*').eq('school', school);
+    const { data: results } = await supabase.from('exam_results').select('*').eq('school', school);
+    const { data: assignments } = await supabase.from('assignments').select('*').eq('school', school);
+
+    // ✅ Map snake_case to camelCase
+    const cleanStudents = (students || []).map((s: any) => ({
+      ...s,
+      teacherId: s.teacher_id,
+      quizCount: s.quiz_count,
+    }));
+
+    const cleanResults = (results || []).map((r: any) => ({
+      ...r,
+      studentId: r.student_id,
+      studentName: r.student_name,
+      totalQuestions: r.total_questions,
+      assignmentId: r.assignment_id,
+    }));
+
+    const cleanAssignments = (assignments || []).map((a: any) => ({
+      ...a,
+      questionCount: a.question_count,
+      createdBy: a.created_by,
+    }));
+
+    return { 
+      students: cleanStudents, 
+      results: cleanResults,
+      assignments: cleanAssignments
+    };
+  } catch (e) {
+    console.error("Get dashboard error", e);
+    return { students: [], results: [], assignments: [] };
+  }
+}
+
+// Manage Student
+export const manageStudent = async (params: any): Promise<{success: boolean, student?: Student}> => {
+    try {
+        if (params.action === 'add') {
+             // Generate ID if not provided (simple 5 digit)
+             const id = Math.floor(10000 + Math.random() * 90000).toString();
+             const newStudent = { ...params, id };
+             delete newStudent.action;
+             
+             const { data, error } = await supabase.from('students').insert([newStudent]).select().single();
+             if (error) throw error;
+             return { success: true, student: data as Student };
+        } else if (params.action === 'edit') {
+             const { id, ...updates } = params;
+             delete updates.action;
+             const { error } = await supabase.from('students').update(updates).eq('id', id);
+             if (error) throw error;
+             return { success: true };
+        } else if (params.action === 'delete') {
+             const { error } = await supabase.from('students').delete().eq('id', params.id);
+             if (error) throw error;
+             return { success: true };
+        }
+    } catch (e) {
+        console.error(e);
+    }
+    return { success: false };
+};
+
+// Manage Teacher
+export const manageTeacher = async (params: any): Promise<{success: boolean, message?: string}> => {
+    try {
+        if (params.action === 'add') {
+             const { action, ...data } = params;
+             const { error } = await supabase.from('teachers').insert([data]);
+             if (error) throw error;
+        } else if (params.action === 'edit') {
+             const { action, id, ...data } = params;
+             const { error } = await supabase.from('teachers').update(data).eq('id', id);
+             if (error) throw error;
+        } else if (params.action === 'delete') {
+             const { error } = await supabase.from('teachers').delete().eq('id', params.id);
+             if (error) throw error;
+        }
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, message: e.message };
+    }
 };
 
 export const getAllTeachers = async (): Promise<Teacher[]> => {
     const { data } = await supabase.from('teachers').select('*');
-    return (data || []).map((t: any) => ({ ...t, gradeLevel: t.grade_level }));
-};
-
-export const manageTeacher = async (data: any): Promise<{success: boolean, message?: string}> => {
-    try {
-        if (data.action === 'add') {
-             const { error } = await supabase.from('teachers').insert([{
-                 id: Date.now().toString(),
-                 name: data.name,
-                 username: data.username,
-                 password: data.password,
-                 school: data.school,
-                 role: data.role,
-                 grade_level: data.gradeLevel
-             }]);
-             if (error) throw error;
-        } else if (data.action === 'edit' && data.id) {
-             const updateData: any = {};
-             if (data.name) updateData.name = data.name;
-             if (data.password) updateData.password = data.password;
-             if (data.school) updateData.school = data.school;
-             if (data.gradeLevel) updateData.grade_level = data.gradeLevel;
-             if (data.role) updateData.role = data.role;
-             await supabase.from('teachers').update(updateData).eq('id', data.id);
-        } else if (data.action === 'delete' && data.id) {
-             await supabase.from('teachers').delete().eq('id', data.id);
-        }
-        return { success: true };
-    } catch (e: any) { return { success: false, message: e.message }; }
-};
-
-// ---------------------------------------------------------------------------
-// 🟢 STUDENTS
-// ---------------------------------------------------------------------------
-
-export const manageStudent = async (data: any): Promise<{success: boolean, student?: Student, message?: string}> => {
-  try {
-    if (data.action === 'add') {
-         let newId = Math.floor(10000 + Math.random() * 90000).toString();
-         const newStudent = { 
-             id: newId, 
-             name: data.name!, 
-             school: data.school, 
-             avatar: data.avatar!, 
-             stars: 0, 
-             grade: data.grade, 
-             teacher_id: data.teacherId,
-             quiz_count: 0,
-             tokens: 0,
-             level: 1,
-             inventory: [] 
-         };
-         const { error } = await supabase.from('students').insert([newStudent]);
-         if (error) throw error;
-         
-         const studentRes: Student = { 
-             ...newStudent,
-             teacherId: newStudent.teacher_id,
-             quizCount: newStudent.quiz_count
-         };
-         return { success: true, student: studentRes };
-    } else if (data.action === 'edit' && data.id) {
-         const updateData: any = {};
-         if (data.name) updateData.name = data.name;
-         if (data.avatar) updateData.avatar = data.avatar;
-         if (data.grade) updateData.grade = data.grade;
-         await supabase.from('students').update(updateData).eq('id', data.id);
-         return { success: true };
-    } else if (data.action === 'delete' && data.id) {
-         await supabase.from('students').delete().eq('id', data.id);
-         return { success: true };
-    }
-    return { success: false };
-  } catch (e: any) { return { success: false, message: e.message }; }
-};
-
-// ---------------------------------------------------------------------------
-// 🟢 TEACHER DASHBOARD
-// ---------------------------------------------------------------------------
-
-export const getTeacherDashboard = async (school: string) => {
-  try {
-    const cleanSchool = cleanString(school);
-    const [studentsRes, resultsRes, assignmentsRes] = await Promise.all([
-        supabase.from('students').select('*').eq('school', cleanSchool),
-        supabase.from('exam_results').select('*').eq('school', cleanSchool),
-        supabase.from('assignments').select('*').eq('school', cleanSchool)
-    ]);
-
-    const students = (studentsRes.data || []).map((s:any) => ({
-        ...s, 
-        quizCount: s.quiz_count, 
-        teacherId: s.teacher_id 
-    }));
-
-    const results = (resultsRes.data || []).map((r:any) => ({
-        ...r, 
-        studentId: r.student_id, 
-        totalQuestions: r.total_questions,
-        assignmentId: r.assignment_id
-    }));
-
-    const assignments = (assignmentsRes.data || []).map((a:any) => ({
-        ...a, 
-        questionCount: a.question_count, 
-        createdBy: a.created_by 
-    }));
-
-    return { students, results, assignments, questions: [] };
-  } catch (e) { return { students: [], results: [], assignments: [], questions: [] }; }
+    return data || [];
 }
 
-// ---------------------------------------------------------------------------
-// 🟢 QUESTIONS & ASSIGNMENTS
-// ---------------------------------------------------------------------------
-
-export const addQuestion = async (question: any): Promise<boolean> => {
-  const { error } = await supabase.from('questions').insert([{
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-        subject: question.subject,
-        grade: question.grade,
-        text: question.text,
-        image: question.image || '',
-        choices: [ { id: '1', text: question.c1 }, { id: '2', text: question.c2 }, { id: '3', text: question.c3 }, { id: '4', text: question.c4 } ],
-        correct_choice_id: question.correct,
-        explanation: question.explanation,
-        school: question.school,
-        teacher_id: question.teacherId
-  }]);
-  return !error;
+// Manage Schools
+export const getSchools = async (): Promise<School[]> => {
+    const { data } = await supabase.from('schools').select('*');
+    return data || [];
 };
 
-export const editQuestion = async (question: any): Promise<boolean> => {
-    if (!question.id) return false;
-    const { error } = await supabase.from('questions').update({
-        subject: question.subject,
-        grade: question.grade,
-        text: question.text,
-        image: question.image || '',
-        choices: [ { id: '1', text: question.c1 }, { id: '2', text: question.c2 }, { id: '3', text: question.c3 }, { id: '4', text: question.c4 } ],
-        correct_choice_id: question.correct,
-        explanation: question.explanation
-    }).eq('id', question.id);
-    return !error;
+export const manageSchool = async (params: any) => {
+    if (params.action === 'add') await supabase.from('schools').insert([{ name: params.name, status: 'active' }]);
+    if (params.action === 'edit') await supabase.from('schools').update({ status: params.status }).eq('id', params.id);
+    if (params.action === 'delete') await supabase.from('schools').delete().eq('id', params.id);
 };
 
-export const deleteQuestion = async (id: string): Promise<boolean> => {
-  const { error } = await supabase.from('questions').delete().eq('id', id);
-  return !error;
+// Registration Logic
+export const getRegistrationStatus = async () => {
+    const { data } = await supabase.from('system_settings').select('value').eq('key', 'registration_enabled').single();
+    return data?.value === 'true';
 };
 
-export const addAssignment = async (school: string, subject: string, grade: string, questionCount: number, deadline: string, createdBy: string, title: string = ''): Promise<boolean> => {
-    const { error } = await supabase.from('assignments').insert([{
-        id: Date.now().toString(),
-        school,
-        subject,
-        grade,
-        question_count: questionCount,
-        deadline,
-        created_by: createdBy,
-        title
+export const toggleRegistrationStatus = async (enabled: boolean) => {
+    await supabase.from('system_settings').upsert({ key: 'registration_enabled', value: String(enabled) });
+};
+
+export const getPendingRegistrations = async () => {
+    const { data } = await supabase.from('registration_requests').select('*').eq('status', 'pending');
+    return (data || []).map((d:any) => ({...d, citizenId: d.citizen_id}));
+};
+
+export const approveRegistration = async (req: RegistrationRequest, school: string) => {
+    // Create teacher account
+    const { error } = await supabase.from('teachers').insert({
+        username: req.citizenId, // Use Citizen ID as username
+        password: '123456', // Default password
+        name: `${req.name} ${req.surname}`,
+        school: school,
+        role: 'TEACHER',
+        grade_level: 'ALL'
+    });
+    
+    if (!error) {
+        await supabase.from('registration_requests').update({ status: 'approved' }).eq('id', req.id);
+        return true;
+    }
+    return false;
+};
+
+export const rejectRegistration = async (id: string) => {
+    await supabase.from('registration_requests').update({ status: 'rejected' }).eq('id', id);
+};
+
+// Questions & Assignments
+export const addQuestion = async (q: any) => {
+    const { error } = await supabase.from('questions').insert([{
+        subject: q.subject,
+        grade: q.grade,
+        text: q.text,
+        image: q.image,
+        choices: JSON.stringify([
+            { id: '1', text: q.c1 }, { id: '2', text: q.c2 }, { id: '3', text: q.c3 }, { id: '4', text: q.c4 }
+        ]),
+        correct_choice_id: q.correct,
+        explanation: q.explanation,
+        school: q.school,
+        teacher_id: q.teacherId
     }]);
     return !error;
 };
 
-export const deleteAssignment = async (id: string): Promise<boolean> => {
-  const { error } = await supabase.from('assignments').delete().eq('id', id);
-  return !error;
+export const editQuestion = async (q: any) => {
+    const { error } = await supabase.from('questions').update({
+        subject: q.subject,
+        grade: q.grade,
+        text: q.text,
+        image: q.image,
+        choices: JSON.stringify([
+            { id: '1', text: q.c1 }, { id: '2', text: q.c2 }, { id: '3', text: q.c3 }, { id: '4', text: q.c4 }
+        ]),
+        correct_choice_id: q.correct,
+        explanation: q.explanation
+    }).eq('id', q.id);
+    return !error;
 };
 
-// ---------------------------------------------------------------------------
-// 🟢 SAVE SCORES
-// ---------------------------------------------------------------------------
+export const deleteQuestion = async (id: string) => {
+    await supabase.from('questions').delete().eq('id', id);
+};
 
+export const getQuestionsBySubject = async (subject: string) => {
+    const { data } = await supabase.from('questions').select('*').eq('subject', subject);
+    return (data || []).map((q: any) => ({
+      ...q, id: String(q.id),
+      choices: typeof q.choices === 'string' ? JSON.parse(q.choices) : q.choices,
+      correctChoiceId: String(q.correct_choice_id),
+      teacherId: String(q.teacher_id)
+    }));
+};
+
+export const addAssignment = async (school: string, subject: string, grade: string, questionCount: number, deadline: string, createdBy: string, title?: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase.from('assignments').insert([{
+      school,
+      subject,
+      grade,
+      question_count: questionCount,
+      deadline,
+      created_by: createdBy,
+      title
+    }]);
+    return !error;
+  } catch (e) {
+    console.error("Add assignment error", e);
+    return false;
+  }
+};
+
+export const deleteAssignment = async (id: string) => {
+    const { error } = await supabase.from('assignments').delete().eq('id', id);
+    return !error;
+};
+
+// Subjects
+export const getSubjects = async (school: string) => {
+    const { data } = await supabase.from('subjects').select('*').eq('school', school);
+    return (data || []).map((s:any) => ({...s, teacherId: s.teacher_id}));
+};
+
+export const addSubject = async (school: string, sub: SubjectConfig) => {
+    const { error } = await supabase.from('subjects').insert({
+        name: sub.name, school, teacher_id: sub.teacherId, grade: sub.grade, icon: sub.icon, color: sub.color
+    });
+    return !error;
+};
+
+export const deleteSubject = async (school: string, id: string) => {
+    await supabase.from('subjects').delete().eq('id', id);
+};
+
+// ✅ Stats (Real Data)
+export const getAllSchoolStats = async (): Promise<SchoolStats[]> => {
+    try {
+        const { data: schools } = await supabase.from('schools').select('name, status');
+        const stats: SchoolStats[] = [];
+        
+        if (schools) {
+            for (const s of schools) {
+                 // Count students
+                 const { count: studentCount } = await supabase
+                    .from('students')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('school', s.name);
+
+                 // Count activity (exam results)
+                 const { count: activityCount, data: lastActivity } = await supabase
+                    .from('exam_results')
+                    .select('timestamp', { count: 'exact' })
+                    .eq('school', s.name)
+                    .order('timestamp', { ascending: false })
+                    .limit(1);
+
+                 stats.push({
+                     schoolName: s.name,
+                     loginCount: studentCount || 0,  // Using student count as proxy for potential users
+                     activityCount: activityCount || 0,
+                     lastActive: lastActivity && lastActivity[0] ? lastActivity[0].timestamp : 0
+                 });
+            }
+        }
+        return stats;
+    } catch (e) {
+        console.error("Error fetching school stats:", e);
+        return [];
+    }
+};
+
+// ✅ บันทึกคะแนนสอบ
 export const saveScore = async (
     studentId: string, 
     studentName: string, 
@@ -390,54 +362,152 @@ export const saveScore = async (
     total: number, 
     subject: string, 
     assignmentId?: string,
-    updates?: Partial<Student>
+    gamificationData?: { quizCount: number, tokens: number, level: number, inventory: string[] }
 ) => {
   try {
-    // 1. Insert Result (Only if not GAME_MODE for now, or you can decide to save game results too)
+    // 1. Save Result (if not game mode only)
     if (subject !== 'GAME_MODE') {
         await supabase.from('exam_results').insert([{
-            id: Date.now().toString(),
             student_id: studentId,
             student_name: studentName,
-            school: school,
+            school,
             score,
             total_questions: total,
             subject,
-            assignment_id: assignmentId || '-',
+            assignment_id: assignmentId,
             timestamp: Date.now()
         }]);
     }
-    
-    // 2. Fetch current student stats
-    const { data: currentData } = await supabase.from('students').select('stars').eq('id', studentId).single();
-    const currentStars = currentData?.stars || 0;
 
-    // 3. Prepare update object
-    const updatePayload: any = { stars: currentStars + score };
-    
-    if (updates) {
-        if (updates.quizCount !== undefined) updatePayload.quiz_count = updates.quizCount;
-        if (updates.tokens !== undefined) updatePayload.tokens = updates.tokens;
-        if (updates.level !== undefined) updatePayload.level = updates.level;
-        if (updates.inventory !== undefined) updatePayload.inventory = updates.inventory;
+    // 2. Update Student Stats & Gamification
+    const updatePayload: any = { 
+        // Need to fetch current stars first or use RPC for atomic increment. 
+        // For simplicity here, we assume client passed updated state or we rely on gamificationData
+    };
+
+    // If gamification data provided, update it
+    if (gamificationData) {
+        // Also add score to stars
+        const { data: s } = await supabase.from('students').select('stars').eq('id', studentId).single();
+        const currentStars = s?.stars || 0;
+        
+        await supabase.from('students').update({
+            stars: currentStars + score,
+            quiz_count: gamificationData.quizCount,
+            tokens: gamificationData.tokens,
+            level: gamificationData.level,
+            inventory: gamificationData.inventory
+        }).eq('id', studentId);
+    } else {
+        // Just increment stars
+        const { data: s } = await supabase.from('students').select('stars').eq('id', studentId).single();
+        await supabase.from('students').update({ stars: (s?.stars || 0) + score }).eq('id', studentId);
     }
-
-    // 4. Update Student
-    await supabase.from('students').update(updatePayload).eq('id', studentId);
+    
     return true;
-
-  } catch (e) { 
-      console.error(e);
-      return false; 
+  } catch (e) {
+    console.error("Save score error", e);
+    return false;
   }
 }
 
-// ---------------------------------------------------------------------------
-// 🟢 MOCKED REGISTRATION FUNCTIONS (For compatibility)
-// ---------------------------------------------------------------------------
-export const getRegistrationStatus = async (): Promise<boolean> => true;
-export const toggleRegistrationStatus = async (enabled: boolean): Promise<boolean> => true;
-export const requestRegistration = async (citizenId: string, name: string, surname: string): Promise<{success: boolean, message: string}> => ({success: true, message: 'ระบบสมัครสมาชิกยังไม่เปิดใช้งานใน Demo'});
-export const getPendingRegistrations = async (): Promise<RegistrationRequest[]> => [];
-export const approveRegistration = async (req: RegistrationRequest, schoolName: string): Promise<boolean> => true;
-export const rejectRegistration = async (reqId: string): Promise<boolean> => true;
+// Get Data For Student
+export const getDataForStudent = async (student: Student): Promise<{results: ExamResult[], assignments: Assignment[], subjects: SubjectConfig[]}> => {
+    try {
+        const school = student.school || '';
+        const [res, assign, subs] = await Promise.all([
+            supabase.from('exam_results').select('*').eq('student_id', student.id),
+            supabase.from('assignments').select('*').eq('school', school),
+            supabase.from('subjects').select('*').eq('school', school)
+        ]);
+        
+        const cleanResults = (res.data || []).map((r: any) => ({
+            id: r.id,
+            studentId: String(r.student_id),
+            subject: normalizeSubject(r.subject),
+            score: Number(r.score),
+            totalQuestions: Number(r.total_questions),
+            timestamp: Number(r.timestamp),
+            assignmentId: r.assignment_id
+        }));
+
+        const cleanAssignments = (assign.data || []).map((a: any) => ({
+            id: String(a.id),
+            school: String(a.school),
+            subject: normalizeSubject(a.subject),
+            grade: a.grade,
+            questionCount: Number(a.question_count),
+            deadline: String(a.deadline),
+            createdBy: String(a.created_by),
+            title: a.title
+        }));
+        
+        const cleanSubjects = (subs.data || []).map((s:any) => ({
+            ...s, teacherId: s.teacher_id
+        }));
+
+        return { results: cleanResults, assignments: cleanAssignments, subjects: cleanSubjects };
+    } catch (e) {
+        return { results: [], assignments: [], subjects: [] };
+    }
+};
+
+export const fetchAppData = async (): Promise<AppData> => {
+  try {
+    const [studentsRes, questionsRes, resultsRes, assignmentsRes, subjectsRes] = await Promise.all([
+      supabase.from('students').select('*'),
+      supabase.from('questions').select('*'),
+      supabase.from('exam_results').select('*'),
+      supabase.from('assignments').select('*'),
+      supabase.from('subjects').select('*')
+    ]);
+
+    const cleanStudents = (studentsRes.data || []).map((s: any) => ({
+      ...s, id: String(s.id).trim(), stars: Number(s.stars) || 0
+    }));
+
+    const cleanQuestions = (questionsRes.data || []).map((q: any) => ({
+      ...q, id: String(q.id).trim(), subject: normalizeSubject(q.subject),
+      choices: typeof q.choices === 'string' ? JSON.parse(q.choices) : q.choices,
+      correctChoiceId: String(q.correct_choice_id),
+      teacherId: String(q.teacher_id)
+    }));
+
+    const cleanResults = (resultsRes.data || []).map((r: any) => ({
+      id: r.id,
+      studentId: String(r.student_id),
+      subject: normalizeSubject(r.subject),
+      score: Number(r.score),
+      totalQuestions: Number(r.total_questions),
+      timestamp: Number(r.timestamp),
+      assignmentId: r.assignment_id
+    }));
+
+    const cleanAssignments = (assignmentsRes.data || []).map((a: any) => ({
+      id: String(a.id),
+      school: String(a.school),
+      subject: normalizeSubject(a.subject),
+      grade: a.grade,
+      questionCount: Number(a.question_count),
+      deadline: String(a.deadline),
+      createdBy: String(a.created_by),
+      title: a.title
+    }));
+    
+    const cleanSubjects = (subjectsRes.data || []).map((s:any) => ({
+        ...s, teacherId: s.teacher_id
+    }));
+
+    return {
+      students: cleanStudents,
+      questions: cleanQuestions,
+      results: cleanResults,
+      assignments: cleanAssignments,
+      subjects: cleanSubjects
+    };
+
+  } catch (error) {
+    console.error("Fetch error:", error);
+    return { students: MOCK_STUDENTS, questions: MOCK_QUESTIONS, results: [], assignments: [], subjects: [] };
+  }
+};
