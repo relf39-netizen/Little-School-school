@@ -1,21 +1,6 @@
 
-
-
-
-import { Student, Question, Teacher, Subject, ExamResult, Assignment, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types'; 
-import { db, firebase } from './firebaseConfig'; 
-
-// Helper: Convert Firebase Object to Array
-const snapshotToArray = <T>(snapshot: any): T[] => {
-  if (!snapshot || !snapshot.val()) return [];
-  const returnArr: T[] = [];
-  snapshot.forEach((childSnapshot: any) => {
-    const item = childSnapshot.val();
-    item.id = childSnapshot.key; // Use Firebase Key as ID
-    returnArr.push(item);
-  });
-  return returnArr;
-};
+import { Student, Question, Teacher, ExamResult, Assignment, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types'; 
+import { supabase } from './firebaseConfig'; 
 
 // Helper: Clean String
 const cleanString = (str?: string) => str ? String(str).trim() : '';
@@ -24,94 +9,53 @@ const cleanString = (str?: string) => str ? String(str).trim() : '';
 // 🟢 UTILS & HELPERS
 // ---------------------------------------------------------------------------
 
-// ✅ Check if school is active
 export const checkSchoolStatus = async (schoolName: string): Promise<boolean> => {
     if (!schoolName || schoolName === 'System') return true;
     try {
-        const snapshot = await db.ref('schools').orderByChild('name').equalTo(schoolName).once('value');
-        if (!snapshot.exists()) return true; // Legacy/Manual schools default to active
-        
-        let isActive = true;
-        snapshot.forEach(child => {
-            const val = child.val();
-            if (val.status === 'inactive') isActive = false;
-        });
-        return isActive;
+        const { data, error } = await supabase
+            .from('schools')
+            .select('status')
+            .eq('name', schoolName)
+            .maybeSingle();
+            
+        if (error || !data) return true; 
+        return data.status !== 'inactive';
     } catch (e) {
         return true; 
     }
 }
 
 // ---------------------------------------------------------------------------
-// 🟢 ANALYTICS & STATS TRACKING
+// 🟢 ANALYTICS & STATS
 // ---------------------------------------------------------------------------
-
-// Function to increment counters atomically (Performant)
-export const trackSchoolActivity = async (school: string, type: 'login' | 'activity') => {
-    if (!school || school === '-' || school === 'System') return;
-    try {
-        const cleanName = cleanString(school);
-        const statsRef = db.ref(`school_stats/${cleanName}`);
-        
-        // Use transaction for atomic updates to prevent race conditions
-        if (type === 'login') {
-            await statsRef.child('loginCount').transaction((current) => (current || 0) + 1);
-        } else if (type === 'activity') {
-            await statsRef.child('activityCount').transaction((current) => (current || 0) + 1);
-        }
-        
-        // Update last active timestamp
-        await statsRef.child('lastActive').set(firebase.database.ServerValue.TIMESTAMP);
-    } catch (e) {
-        console.error("Tracking error (non-blocking):", e);
-    }
-};
 
 export const getAllSchoolStats = async (): Promise<SchoolStats[]> => {
-    try {
-        const snapshot = await db.ref('school_stats').once('value');
-        if (!snapshot.exists()) return [];
-        
-        const stats: SchoolStats[] = [];
-        snapshot.forEach(child => {
-            const val = child.val();
-            stats.push({
-                schoolName: child.key || 'Unknown',
-                loginCount: val.loginCount || 0,
-                activityCount: val.activityCount || 0,
-                lastActive: val.lastActive || 0
-            });
-        });
-        return stats.sort((a, b) => b.lastActive - a.lastActive); // Sort by most recently active
-    } catch (e) {
-        return [];
-    }
+    // ใน Supabase การทำ Aggregation แบบ Complex อาจต้องใช้ RPC หรือ View
+    // เพื่อความง่ายใน Demo นี้ เราจะ Mock ค่าว่างไว้ก่อน หรือดึงข้อมูลดิบมานับ
+    // (Recommended: สร้าง View ใน SQL แล้ว Select จาก View นั้น)
+    return [];
 };
 
 // ---------------------------------------------------------------------------
-// 🟢 LAZY LOAD QUESTIONS
+// 🟢 DATA FETCHING
 // ---------------------------------------------------------------------------
 
 export const getQuestionsBySubject = async (subject: string): Promise<Question[]> => {
     try {
-        const snapshot = await db.ref('questions')
-            .orderByChild('subject')
-            .equalTo(subject)
-            .once('value');
+        const { data, error } = await supabase
+            .from('questions')
+            .select('*')
+            .eq('subject', subject);
         
-        const questions: Question[] = [];
-        snapshot.forEach((child) => {
-            const q = child.val();
-            let choices = q.choices;
-            if (choices && typeof choices === 'object' && !Array.isArray(choices)) {
-                choices = Object.values(choices);
-            }
-            if (!Array.isArray(choices)) choices = [];
-            questions.push({ ...q, id: child.key, choices, image: q.image || '' });
-        });
-        return questions;
+        if (error) throw error;
+
+        return (data || []).map((q: any) => ({
+            ...q,
+            choices: typeof q.choices === 'string' ? JSON.parse(q.choices) : q.choices,
+            correctChoiceId: q.correct_choice_id
+        }));
     } catch (e) {
-        console.error("Error fetching questions by subject", e);
+        console.error("Error fetching questions", e);
         return [];
     }
 }
@@ -122,33 +66,31 @@ export const getQuestionsBySubject = async (subject: string): Promise<Question[]
 
 export const verifyStudentLogin = async (studentId: string): Promise<{ student: Student | null, error?: string }> => {
     try {
-        const snapshot = await db.ref(`students/${studentId}`).once('value');
-        if (snapshot.exists()) {
-            const data = snapshot.val();
-            
-            // ✅ Check School Status
-            if (data.school) {
-                const isActive = await checkSchoolStatus(data.school);
-                if (!isActive) return { student: null, error: 'โรงเรียนถูกระงับการใช้งาน กรุณาติดต่อครูผู้ดูแล' };
-            }
+        const { data, error } = await supabase
+            .from('students')
+            .select('*')
+            .eq('id', studentId)
+            .single();
 
-            // ✅ Track Login
-            if (data.school) trackSchoolActivity(data.school, 'login');
+        if (error || !data) return { student: null, error: 'ไม่พบข้อมูลรหัสนักเรียนนี้' };
             
-            // ✅ Initialize Gamification Fields if missing
-            const student: Student = { 
-                ...data, 
-                id: studentId,
-                quizCount: data.quizCount || 0,
-                tokens: data.tokens || 0,
-                level: data.level || 1,
-                inventory: data.inventory || []
-            };
-            return { student };
+        // Check School Status
+        if (data.school) {
+            const isActive = await checkSchoolStatus(data.school);
+            if (!isActive) return { student: null, error: 'โรงเรียนถูกระงับการใช้งาน' };
         }
-        return { student: null, error: 'ไม่พบข้อมูลรหัสนักเรียนนี้' };
+
+        const student: Student = { 
+            ...data, 
+            id: String(data.id),
+            quizCount: data.quiz_count || 0,
+            tokens: data.tokens || 0,
+            level: data.level || 1,
+            inventory: data.inventory || []
+        };
+        return { student };
     } catch (error) {
-        console.error("Login verification failed:", error);
+        console.error("Login failed:", error);
         return { student: null, error: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' };
     }
 };
@@ -161,25 +103,32 @@ export const getDataForStudent = async (student: Student): Promise<{
 }> => {
     try {
         const cleanSchool = cleanString(student.school);
-        const [resultsSnap, assignmentsSnap, subjectsSnap] = await Promise.all([
-            db.ref('results').orderByChild('studentId').equalTo(student.id).once('value'),
-            db.ref('assignments').orderByChild('school').equalTo(cleanSchool).once('value'),
-            db.ref(`subjects/${cleanSchool}`).once('value')
+        
+        const [resultsRes, assignmentsRes, subjectsRes] = await Promise.all([
+            supabase.from('exam_results').select('*').eq('student_id', student.id),
+            supabase.from('assignments').select('*').eq('school', cleanSchool),
+            supabase.from('subjects').select('*').eq('school', cleanSchool)
         ]);
 
-        const results = snapshotToArray<ExamResult>(resultsSnap);
-        const assignments = snapshotToArray<Assignment>(assignmentsSnap);
+        const results = (resultsRes.data || []).map((r: any) => ({
+            ...r,
+            studentId: r.student_id,
+            totalQuestions: r.total_questions,
+            assignmentId: r.assignment_id
+        }));
+
+        const assignments = (assignmentsRes.data || []).map((a: any) => ({
+            ...a,
+            questionCount: a.question_count,
+            createdBy: a.created_by
+        }));
         
-        // Lazy load: Return empty questions initially
-        const questions: Question[] = [];
+        const subjects = (subjectsRes.data || []).map((s: any) => ({
+            ...s,
+            teacherId: s.teacher_id
+        }));
 
-        let subjects: SubjectConfig[] = [];
-        if (subjectsSnap.exists()) {
-            const subData = subjectsSnap.val();
-            subjects = Object.keys(subData).map(key => ({ ...subData[key], id: key }));
-        }
-
-        return { questions, results, assignments, subjects };
+        return { questions: [], results, assignments, subjects };
 
     } catch (error) {
         console.error("Error fetching student data:", error);
@@ -188,83 +137,51 @@ export const getDataForStudent = async (student: Student): Promise<{
 };
 
 // ---------------------------------------------------------------------------
-// 🟢 SCHOOLS
+// 🟢 SCHOOLS & SUBJECTS
 // ---------------------------------------------------------------------------
 
 export const getSchools = async (): Promise<School[]> => {
-  try {
-    const snapshot = await db.ref('schools').once('value');
-    const schools = snapshotToArray<School>(snapshot);
-    // Add legacy schools from teachers if missing
-    const teachersSnap = await db.ref('teachers').once('value');
-    const teachers = snapshotToArray<Teacher>(teachersSnap);
-    const existingSchoolNames = new Set(schools.map(s => s.name));
-    teachers.forEach(t => {
-        const sName = cleanString(t.school);
-        if (sName && sName !== 'System' && !existingSchoolNames.has(sName)) {
-            schools.push({ id: `legacy_${sName}`, name: sName, status: 'active' });
-            existingSchoolNames.add(sName);
-        }
-    });
-    return schools;
-  } catch (e) {
-    return [];
-  }
+  const { data } = await supabase.from('schools').select('*');
+  return data || [];
 };
 
 export const manageSchool = async (data: { action: 'add' | 'edit' | 'delete', name?: string, id?: string, status?: 'active' | 'inactive' }): Promise<boolean> => {
   try {
     if (data.action === 'add' && data.name) {
-      const cleanName = cleanString(data.name);
-      const existing = await db.ref('schools').orderByChild('name').equalTo(cleanName).once('value');
-      if (existing.exists()) return false;
-      const newRef = db.ref('schools').push();
-      await newRef.set({ id: newRef.key, name: cleanName, status: 'active' });
-      return true;
+      const { error } = await supabase.from('schools').insert([{ id: Date.now().toString(), name: data.name, status: 'active' }]);
+      return !error;
     } else if (data.action === 'edit' && data.id) {
-      const updateData: any = {};
-      if (data.name) updateData.name = data.name;
-      if (data.status) updateData.status = data.status;
-      await db.ref(`schools/${data.id}`).update(updateData);
-      return true;
+      const { error } = await supabase.from('schools').update({ status: data.status }).eq('id', data.id);
+      return !error;
     } else if (data.action === 'delete' && data.id) {
-      if (!data.id.startsWith('legacy_')) await db.ref(`schools/${data.id}`).remove();
-      return true;
+      const { error } = await supabase.from('schools').delete().eq('id', data.id);
+      return !error;
     }
     return false;
-  } catch (e) { return false; }
+  } catch { return false; }
 };
 
-// ---------------------------------------------------------------------------
-// 🟢 SUBJECTS
-// ---------------------------------------------------------------------------
-
 export const getSubjects = async (school: string): Promise<SubjectConfig[]> => {
-  try {
-    const cleanSchool = cleanString(school);
-    const snapshot = await db.ref(`subjects/${cleanSchool}`).once('value');
-    if (snapshot.exists()) {
-        const data = snapshot.val();
-        return Object.keys(data).map(key => ({ ...data[key], id: key }));
-    }
-    return [];
-  } catch (e) { return []; }
+  const { data } = await supabase.from('subjects').select('*').eq('school', school);
+  return (data || []).map((s: any) => ({ ...s, teacherId: s.teacher_id }));
 };
 
 export const addSubject = async (school: string, subject: SubjectConfig): Promise<boolean> => {
-  try {
-    const cleanSchool = cleanString(school);
-    const newRef = db.ref(`subjects/${cleanSchool}`).push();
-    await newRef.set({ ...subject, id: newRef.key });
-    return true;
-  } catch (e) { return false; }
+  const { error } = await supabase.from('subjects').insert([{
+        id: subject.id,
+        name: subject.name,
+        school: school,
+        teacher_id: subject.teacherId,
+        grade: subject.grade,
+        icon: subject.icon,
+        color: subject.color
+  }]);
+  return !error;
 };
 
 export const deleteSubject = async (school: string, subjectId: string): Promise<boolean> => {
-  try {
-    await db.ref(`subjects/${cleanString(school)}/${subjectId}`).remove();
-    return true;
-  } catch (e) { return false; }
+  const { error } = await supabase.from('subjects').delete().eq('id', subjectId);
+  return !error;
 };
 
 // ---------------------------------------------------------------------------
@@ -273,181 +190,133 @@ export const deleteSubject = async (school: string, subjectId: string): Promise<
 
 export const teacherLogin = async (username: string, password: string): Promise<{success: boolean, teacher?: Teacher, message?: string}> => {
   try {
-    const snapshot = await db.ref('teachers').orderByChild('username').equalTo(username).once('value');
-    if (snapshot.exists()) {
-      const teachers = snapshotToArray<Teacher>(snapshot);
-      const teacher = teachers[0];
-      if (teacher && teacher.password === password) {
-          
-          // ✅ Check School Status
-          if(teacher.school && teacher.school !== 'System') {
-             const isSchoolActive = await checkSchoolStatus(teacher.school);
+    const { data, error } = await supabase.from('teachers').select('*').eq('username', username).maybeSingle();
+    
+    if (data && data.password === password) {
+          if(data.school && data.school !== 'System') {
+             const isSchoolActive = await checkSchoolStatus(data.school);
              if(!isSchoolActive) {
-                 return { success: false, message: 'โรงเรียนถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
+                 return { success: false, message: 'โรงเรียนถูกระงับการใช้งาน' };
              }
           }
-
-          // ✅ Track Teacher Login
-          if(teacher.school) trackSchoolActivity(teacher.school, 'login');
-          
+          const teacher: Teacher = { ...data, gradeLevel: data.grade_level };
           return { success: true, teacher };
-      }
-    } else {
-        if (username === 'admin' && password === '1234') {
-             const newAdmin: Teacher = { id: 'admin_root', username: 'admin', password: '1234', name: 'Super Admin', school: 'System', role: 'ADMIN', gradeLevel: 'ALL' };
-             await db.ref('teachers/admin_root').set(newAdmin);
-             return { success: true, teacher: newAdmin };
-        }
     }
     return { success: false, message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
-  } catch (e) { return { success: false, message: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' }; }
+  } catch { return { success: false, message: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' }; }
 };
 
 export const getAllTeachers = async (): Promise<Teacher[]> => {
-  try {
-    const snapshot = await db.ref('teachers').once('value');
-    return snapshotToArray<Teacher>(snapshot);
-  } catch (e) { return []; }
+    const { data } = await supabase.from('teachers').select('*');
+    return (data || []).map((t: any) => ({ ...t, gradeLevel: t.grade_level }));
 };
 
-export const manageTeacher = async (data: { action: 'add' | 'delete' | 'edit', id?: string, username?: string, password?: string, name?: string, school?: string, role?: string, gradeLevel?: string }): Promise<{success: boolean, message?: string}> => {
+export const manageTeacher = async (data: any): Promise<{success: boolean, message?: string}> => {
     try {
-        const cleanSchool = cleanString(data.school);
         if (data.action === 'add') {
-             const newRef = db.ref('teachers').push();
-             await newRef.set({ id: newRef.key, name: data.name, username: data.username, password: data.password, school: cleanSchool, role: data.role, gradeLevel: data.gradeLevel });
+             const { error } = await supabase.from('teachers').insert([{
+                 id: Date.now().toString(),
+                 name: data.name,
+                 username: data.username,
+                 password: data.password,
+                 school: data.school,
+                 role: data.role,
+                 grade_level: data.gradeLevel
+             }]);
+             if (error) throw error;
         } else if (data.action === 'edit' && data.id) {
              const updateData: any = {};
              if (data.name) updateData.name = data.name;
              if (data.password) updateData.password = data.password;
-             if (data.school) updateData.school = cleanSchool;
-             if (data.gradeLevel) updateData.gradeLevel = data.gradeLevel;
+             if (data.school) updateData.school = data.school;
+             if (data.gradeLevel) updateData.grade_level = data.gradeLevel;
              if (data.role) updateData.role = data.role;
-             await db.ref(`teachers/${data.id}`).update(updateData);
+             await supabase.from('teachers').update(updateData).eq('id', data.id);
         } else if (data.action === 'delete' && data.id) {
-             await db.ref(`teachers/${data.id}`).remove();
+             await supabase.from('teachers').delete().eq('id', data.id);
         }
         return { success: true };
-    } catch (e) { return { success: false, message: 'Firebase Error' }; }
-};
-
-// ---------------------------------------------------------------------------
-// 🟢 REGISTRATIONS
-// ---------------------------------------------------------------------------
-
-export const getRegistrationStatus = async (): Promise<boolean> => {
-    try {
-        const snap = await db.ref('system_settings/registration_enabled').once('value');
-        return snap.val() === true;
-    } catch (e) { return false; }
-};
-
-export const toggleRegistrationStatus = async (enabled: boolean): Promise<boolean> => {
-    try {
-        await db.ref('system_settings/registration_enabled').set(enabled);
-        return true;
-    } catch (e) { return false; }
-};
-
-export const requestRegistration = async (citizenId: string, name: string, surname: string): Promise<{success: boolean, message: string}> => {
-    try {
-        const isEnabled = await getRegistrationStatus();
-        if (!isEnabled) return { success: false, message: 'ระบบปิดรับสมัครสมาชิกชั่วคราว' };
-        const teacherSnap = await db.ref('teachers').orderByChild('username').equalTo(citizenId).once('value');
-        if (teacherSnap.exists()) return { success: false, message: 'เลขบัตรประชาชนนี้มีในระบบแล้ว' };
-        const newRef = db.ref('pending_registrations').push();
-        await newRef.set({ id: newRef.key, citizenId, name, surname, timestamp: firebase.database.ServerValue.TIMESTAMP });
-        return { success: true, message: 'ส่งคำขอสำเร็จ รอผู้ดูแลระบบอนุมัติ' };
-    } catch (e) { return { success: false, message: 'เกิดข้อผิดพลาด' }; }
-};
-
-export const getPendingRegistrations = async (): Promise<RegistrationRequest[]> => {
-    try {
-        const snapshot = await db.ref('pending_registrations').once('value');
-        return snapshotToArray<RegistrationRequest>(snapshot);
-    } catch (e) { return []; }
-};
-
-export const approveRegistration = async (req: RegistrationRequest, schoolName: string): Promise<boolean> => {
-    try {
-        const cleanSchool = cleanString(schoolName);
-        const newRef = db.ref('teachers').push();
-        await newRef.set({ id: newRef.key, name: `${req.name} ${req.surname}`, username: req.citizenId, password: '123456', school: cleanSchool, role: 'TEACHER', gradeLevel: 'ALL', citizenId: req.citizenId });
-        await db.ref(`pending_registrations/${req.id}`).remove();
-        await manageSchool({ action: 'add', name: cleanSchool });
-        return true;
-    } catch (e) { return false; }
-};
-
-export const rejectRegistration = async (reqId: string): Promise<boolean> => {
-    try { await db.ref(`pending_registrations/${reqId}`).remove(); return true; } catch (e) { return false; }
+    } catch (e: any) { return { success: false, message: e.message }; }
 };
 
 // ---------------------------------------------------------------------------
 // 🟢 STUDENTS
 // ---------------------------------------------------------------------------
 
-export const manageStudent = async (data: { action: 'add' | 'edit' | 'delete', id?: string, name?: string, school?: string, avatar?: string, grade?: string, teacherId?: string }): Promise<{success: boolean, student?: Student, message?: string}> => {
+export const manageStudent = async (data: any): Promise<{success: boolean, student?: Student, message?: string}> => {
   try {
-    const cleanSchool = cleanString(data.school);
     if (data.action === 'add') {
          let newId = Math.floor(10000 + Math.random() * 90000).toString();
-         const newStudent: Student = { 
+         const newStudent = { 
              id: newId, 
              name: data.name!, 
-             school: cleanSchool, 
+             school: data.school, 
              avatar: data.avatar!, 
              stars: 0, 
              grade: data.grade, 
-             teacherId: data.teacherId,
-             // Gamification Defaults
-             quizCount: 0,
+             teacher_id: data.teacherId,
+             quiz_count: 0,
              tokens: 0,
              level: 1,
              inventory: [] 
          };
-         await db.ref(`students/${newId}`).set(newStudent);
-         return { success: true, student: newStudent };
+         const { error } = await supabase.from('students').insert([newStudent]);
+         if (error) throw error;
+         
+         const studentRes: Student = { 
+             ...newStudent,
+             teacherId: newStudent.teacher_id,
+             quizCount: newStudent.quiz_count
+         };
+         return { success: true, student: studentRes };
     } else if (data.action === 'edit' && data.id) {
          const updateData: any = {};
          if (data.name) updateData.name = data.name;
          if (data.avatar) updateData.avatar = data.avatar;
          if (data.grade) updateData.grade = data.grade;
-         await db.ref(`students/${data.id}`).update(updateData);
+         await supabase.from('students').update(updateData).eq('id', data.id);
          return { success: true };
     } else if (data.action === 'delete' && data.id) {
-         await db.ref(`students/${data.id}`).remove();
+         await supabase.from('students').delete().eq('id', data.id);
          return { success: true };
     }
     return { success: false };
-  } catch (e) { return { success: false, message: 'Firebase Error' }; }
-};
-
-// Wrapper for simple adding (Compatibility)
-export const addStudent = async (name: string, school: string, avatar: string): Promise<Student | null> => {
-    const res = await manageStudent({ action: 'add', name, school, avatar, grade: 'P6', teacherId: '' });
-    return res.student || null;
+  } catch (e: any) { return { success: false, message: e.message }; }
 };
 
 // ---------------------------------------------------------------------------
-// 🟢 DASHBOARD DATA
+// 🟢 TEACHER DASHBOARD
 // ---------------------------------------------------------------------------
 
 export const getTeacherDashboard = async (school: string) => {
   try {
     const cleanSchool = cleanString(school);
-    // Lazy Load: Do NOT load questions here
-    const [studentsSnap, resultsSnap, assignmentsSnap] = await Promise.all([
-        db.ref('students').orderByChild('school').equalTo(cleanSchool).once('value'),
-        db.ref('results').orderByChild('school').equalTo(cleanSchool).once('value'),
-        db.ref('assignments').orderByChild('school').equalTo(cleanSchool).once('value')
+    const [studentsRes, resultsRes, assignmentsRes] = await Promise.all([
+        supabase.from('students').select('*').eq('school', cleanSchool),
+        supabase.from('exam_results').select('*').eq('school', cleanSchool),
+        supabase.from('assignments').select('*').eq('school', cleanSchool)
     ]);
-    return { 
-        students: snapshotToArray<Student>(studentsSnap), 
-        results: snapshotToArray<ExamResult>(resultsSnap), 
-        assignments: snapshotToArray<Assignment>(assignmentsSnap), 
-        questions: [] 
-    };
+
+    const students = (studentsRes.data || []).map((s:any) => ({
+        ...s, 
+        quizCount: s.quiz_count, 
+        teacherId: s.teacher_id 
+    }));
+
+    const results = (resultsRes.data || []).map((r:any) => ({
+        ...r, 
+        studentId: r.student_id, 
+        totalQuestions: r.total_questions,
+        assignmentId: r.assignment_id
+    }));
+
+    const assignments = (assignmentsRes.data || []).map((a:any) => ({
+        ...a, 
+        questionCount: a.question_count, 
+        createdBy: a.created_by 
+    }));
+
+    return { students, results, assignments, questions: [] };
   } catch (e) { return { students: [], results: [], assignments: [], questions: [] }; }
 }
 
@@ -456,38 +325,63 @@ export const getTeacherDashboard = async (school: string) => {
 // ---------------------------------------------------------------------------
 
 export const addQuestion = async (question: any): Promise<boolean> => {
-  try {
-    const newRef = db.ref('questions').push();
-    await newRef.set({ ...question, id: newRef.key, school: cleanString(question.school), choices: [ { id: '1', text: question.c1 }, { id: '2', text: question.c2 }, { id: '3', text: question.c3 }, { id: '4', text: question.c4 } ], correctChoiceId: question.correct });
-    return true;
-  } catch (e) { return false; }
+  const { error } = await supabase.from('questions').insert([{
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+        subject: question.subject,
+        grade: question.grade,
+        text: question.text,
+        image: question.image || '',
+        choices: [ { id: '1', text: question.c1 }, { id: '2', text: question.c2 }, { id: '3', text: question.c3 }, { id: '4', text: question.c4 } ],
+        correct_choice_id: question.correct,
+        explanation: question.explanation,
+        school: question.school,
+        teacher_id: question.teacherId
+  }]);
+  return !error;
 };
 
 export const editQuestion = async (question: any): Promise<boolean> => {
-  try {
     if (!question.id) return false;
-    await db.ref(`questions/${question.id}`).update({ subject: question.subject, grade: question.grade, text: question.text, image: question.image || '', school: cleanString(question.school), choices: [ { id: '1', text: question.c1 }, { id: '2', text: question.c2 }, { id: '3', text: question.c3 }, { id: '4', text: question.c4 } ], correctChoiceId: question.correct, explanation: question.explanation });
-    return true;
-  } catch (e) { return false; }
+    const { error } = await supabase.from('questions').update({
+        subject: question.subject,
+        grade: question.grade,
+        text: question.text,
+        image: question.image || '',
+        choices: [ { id: '1', text: question.c1 }, { id: '2', text: question.c2 }, { id: '3', text: question.c3 }, { id: '4', text: question.c4 } ],
+        correct_choice_id: question.correct,
+        explanation: question.explanation
+    }).eq('id', question.id);
+    return !error;
 };
 
 export const deleteQuestion = async (id: string): Promise<boolean> => {
-  try { await db.ref(`questions/${id}`).remove(); return true; } catch (e) { return false; }
+  const { error } = await supabase.from('questions').delete().eq('id', id);
+  return !error;
 };
 
 export const addAssignment = async (school: string, subject: string, grade: string, questionCount: number, deadline: string, createdBy: string, title: string = ''): Promise<boolean> => {
-  try {
-    const newRef = db.ref('assignments').push();
-    await newRef.set({ id: newRef.key, school: cleanString(school), subject, grade, questionCount, deadline, createdBy, title });
-    return true;
-  } catch (e) { return false; }
+    const { error } = await supabase.from('assignments').insert([{
+        id: Date.now().toString(),
+        school,
+        subject,
+        grade,
+        question_count: questionCount,
+        deadline,
+        created_by: createdBy,
+        title
+    }]);
+    return !error;
 };
 
 export const deleteAssignment = async (id: string): Promise<boolean> => {
-  try { await db.ref(`assignments/${id}`).remove(); return true; } catch (e) { return false; }
+  const { error } = await supabase.from('assignments').delete().eq('id', id);
+  return !error;
 };
 
-// ✅ Updated to handle Gamification
+// ---------------------------------------------------------------------------
+// 🟢 SAVE SCORES
+// ---------------------------------------------------------------------------
+
 export const saveScore = async (
     studentId: string, 
     studentName: string, 
@@ -496,43 +390,54 @@ export const saveScore = async (
     total: number, 
     subject: string, 
     assignmentId?: string,
-    updates?: Partial<Student> // Accepts gamification updates
+    updates?: Partial<Student>
 ) => {
   try {
-    const newRef = db.ref('results').push();
-    await newRef.set({ 
-        id: newRef.key, 
-        studentId, 
-        studentName, 
-        school: cleanString(school), 
-        score, 
-        totalQuestions: total, 
-        subject, 
-        assignmentId: assignmentId || '-', 
-        timestamp: firebase.database.ServerValue.TIMESTAMP 
-    });
+    // 1. Insert Result (Only if not GAME_MODE for now, or you can decide to save game results too)
+    if (subject !== 'GAME_MODE') {
+        await supabase.from('exam_results').insert([{
+            id: Date.now().toString(),
+            student_id: studentId,
+            student_name: studentName,
+            school: school,
+            score,
+            total_questions: total,
+            subject,
+            assignment_id: assignmentId || '-',
+            timestamp: Date.now()
+        }]);
+    }
     
-    // Update student stats (Stars is Score Accumulation)
-    const studentRef = db.ref(`students/${studentId}`);
+    // 2. Fetch current student stats
+    const { data: currentData } = await supabase.from('students').select('stars').eq('id', studentId).single();
+    const currentStars = currentData?.stars || 0;
+
+    // 3. Prepare update object
+    const updatePayload: any = { stars: currentStars + score };
     
-    // Create update object
-    const updatePayload: any = {
-        stars: firebase.database.ServerValue.increment(score)
-    };
-    
-    // Merge gamification updates if provided
     if (updates) {
-        if (updates.quizCount !== undefined) updatePayload.quizCount = updates.quizCount;
+        if (updates.quizCount !== undefined) updatePayload.quiz_count = updates.quizCount;
         if (updates.tokens !== undefined) updatePayload.tokens = updates.tokens;
         if (updates.level !== undefined) updatePayload.level = updates.level;
         if (updates.inventory !== undefined) updatePayload.inventory = updates.inventory;
     }
 
-    await studentRef.update(updatePayload);
-    
-    // ✅ Track Activity (Activity Count)
-    trackSchoolActivity(school, 'activity');
-    
+    // 4. Update Student
+    await supabase.from('students').update(updatePayload).eq('id', studentId);
     return true;
-  } catch (e) { return false; }
+
+  } catch (e) { 
+      console.error(e);
+      return false; 
+  }
 }
+
+// ---------------------------------------------------------------------------
+// 🟢 MOCKED REGISTRATION FUNCTIONS (For compatibility)
+// ---------------------------------------------------------------------------
+export const getRegistrationStatus = async (): Promise<boolean> => true;
+export const toggleRegistrationStatus = async (enabled: boolean): Promise<boolean> => true;
+export const requestRegistration = async (citizenId: string, name: string, surname: string): Promise<{success: boolean, message: string}> => ({success: true, message: 'ระบบสมัครสมาชิกยังไม่เปิดใช้งานใน Demo'});
+export const getPendingRegistrations = async (): Promise<RegistrationRequest[]> => [];
+export const approveRegistration = async (req: RegistrationRequest, schoolName: string): Promise<boolean> => true;
+export const rejectRegistration = async (reqId: string): Promise<boolean> => true;

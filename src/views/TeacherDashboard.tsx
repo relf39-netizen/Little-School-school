@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { Teacher, Student, Assignment, Question, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, ArrowRight, Users, GraduationCap, Trash2, Edit, UserCog, KeyRound, Sparkles, Wand2, Key, Layers, Library, BrainCircuit, List, Trophy, User, Activity, Building, CreditCard, Search, Loader2, Clock, MonitorSmartphone, Power, ToggleLeft, ToggleRight, PenTool } from 'lucide-react';
+import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, ArrowRight, Users, GraduationCap, Trash2, Edit, UserCog, KeyRound, Sparkles, Wand2, Key, List, Trophy, User, Building, CreditCard, Search, Loader2, Clock, MonitorSmartphone, Database, UploadCloud, AlertTriangle, ToggleLeft, ToggleRight, PenTool, BrainCircuit } from 'lucide-react';
 import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration, verifyStudentLogin, getQuestionsBySubject, getAllSchoolStats } from '../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../services/aiService';
+import { supabase } from '../services/firebaseConfig';
 
 interface TeacherDashboardProps {
   teacher: Teacher;
@@ -13,7 +14,7 @@ interface TeacherDashboardProps {
 }
 
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, onStartGame, onAdminLoginAsStudent }) => {
-  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'subjects' | 'stats' | 'questions' | 'assignments' | 'teachers' | 'registrations' | 'profile' | 'onet' | 'admin_stats' | 'monitor'>('menu');
+  const [activeTab, setActiveTab] = useState<'menu' | 'students' | 'subjects' | 'stats' | 'questions' | 'assignments' | 'teachers' | 'registrations' | 'profile' | 'onet' | 'admin_stats' | 'monitor' | 'migration'>('menu');
   
   // ✅ Navigation State for Multi-Grade Views
   const [viewLevel, setViewLevel] = useState<'GRADES' | 'LIST'>('GRADES');
@@ -56,6 +57,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
   // ✅ System Monitor Stats (Admin)
   const [schoolStats, setSchoolStats] = useState<SchoolStats[]>([]);
+
+  // Migration State
+  const [migrationFile, setMigrationFile] = useState<File | null>(null);
+  const [migrationTarget, setMigrationTarget] = useState<string>('auto');
+  const [migrationLog, setMigrationLog] = useState<string[]>([]);
+  const [isMigrating, setIsMigrating] = useState(false);
 
   // Profile Management State
   const [profileName, setProfileName] = useState(teacher.name || '');
@@ -476,6 +483,102 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
      }
   };
 
+  // ✅ Migration Handler
+  const handleMigration = async () => {
+      if (!migrationFile) return alert("กรุณาเลือกไฟล์ JSON");
+      setIsMigrating(true);
+      const logs: string[] = [];
+      const log = (msg: string) => { logs.push(msg); setMigrationLog([...logs]); };
+      
+      try {
+          const text = await migrationFile.text();
+          const json = JSON.parse(text);
+          
+          log(`Loaded file: ${migrationFile.name}`);
+          
+          // Determine structure
+          let dataToImport: any[] = [];
+          let targetTable = migrationTarget;
+
+          // Helper to normalize Firebase object to array
+          const toArray = (obj: any) => {
+             if (Array.isArray(obj)) return obj.filter(x => x);
+             return Object.keys(obj).map(key => ({ id: key, ...obj[key] }));
+          };
+
+          if (migrationTarget === 'auto') {
+              // Try to detect root keys
+              if (json.students) {
+                  log("Detected 'students' node. Importing students...");
+                  const rows = toArray(json.students);
+                  const { error } = await supabase.from('students').upsert(rows);
+                  if(error) log(`Error importing students: ${error.message}`);
+                  else log(`✅ Imported ${rows.length} students.`);
+              }
+              if (json.teachers) {
+                  log("Detected 'teachers' node. Importing teachers...");
+                  const rows = toArray(json.teachers);
+                  const { error } = await supabase.from('teachers').upsert(rows);
+                  if(error) log(`Error importing teachers: ${error.message}`);
+                  else log(`✅ Imported ${rows.length} teachers.`);
+              }
+              if (json.questions) {
+                  log("Detected 'questions' node. Importing questions...");
+                  // Need to fix choices structure if from old system
+                  let rows = toArray(json.questions);
+                  // Normalize fields
+                  rows = rows.map((q: any) => ({
+                      id: q.id,
+                      subject: q.subject,
+                      text: q.text,
+                      grade: q.grade || 'P6',
+                      // Fix choices: convert array of objects to simple jsonb if needed, or keep as is if compatible
+                      choices: JSON.stringify(q.choices), 
+                      correct_choice_id: q.correctChoiceId,
+                      explanation: q.explanation,
+                      school: q.school,
+                      teacher_id: q.teacherId
+                  }));
+
+                  const { error } = await supabase.from('questions').upsert(rows);
+                  if(error) log(`Error importing questions: ${error.message}`);
+                  else log(`✅ Imported ${rows.length} questions.`);
+              }
+          } else {
+               // Specific table import
+               log(`Importing into '${migrationTarget}'...`);
+               let rows = toArray(json); // Assume the file IS the data for that table
+               
+               // Adjust fields based on target
+               if (migrationTarget === 'questions') {
+                    rows = rows.map((q: any) => ({
+                      id: q.id,
+                      subject: q.subject,
+                      text: q.text,
+                      grade: q.grade || 'P6',
+                      choices: typeof q.choices === 'object' ? JSON.stringify(q.choices) : q.choices, 
+                      correct_choice_id: q.correctChoiceId || q.correct_choice_id,
+                      explanation: q.explanation,
+                      school: q.school,
+                      teacher_id: q.teacherId || q.teacher_id
+                   }));
+               }
+               
+               const { error } = await supabase.from(migrationTarget).upsert(rows);
+               if(error) throw error;
+               log(`✅ Imported ${rows.length} rows into ${migrationTarget}.`);
+          }
+          
+          log("Migration Completed.");
+
+      } catch (e: any) {
+          log(`❌ Error: ${e.message}`);
+          console.error(e);
+      } finally {
+          setIsMigrating(false);
+      }
+  };
+
   const formatDate = (dateString: string) => { if (!dateString) return '-'; const date = new Date(dateString); if (isNaN(date.getTime())) return dateString; return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }); };
   const countSubmitted = (assignmentId: string) => { const submittedStudentIds = new Set(stats.filter(r => r.assignmentId === assignmentId).map(r => r.studentId)); return submittedStudentIds.size; };
 
@@ -780,7 +883,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 />
             ) : (
                 <MenuCard 
-                    icon={<Library size={40} />} 
+                    icon={<List size={40} />} 
                     title="จัดการรายวิชา" 
                     desc="เพิ่ม/ลบ รายวิชาที่สอน" 
                     color="bg-pink-50 text-pink-600 border-pink-200" 
@@ -854,6 +957,13 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                   color="bg-slate-700 text-white border-slate-600" 
                   onClick={() => setActiveTab('monitor')} 
                 />
+                <MenuCard 
+                  icon={<Database size={40} />} 
+                  title="นำเข้าข้อมูลเก่า" 
+                  desc="นำเข้าไฟล์ JSON จาก Firebase"
+                  color="bg-emerald-50 text-emerald-600 border-emerald-200" 
+                  onClick={() => setActiveTab('migration')} 
+                />
                 </>
             )}
         </div>
@@ -887,7 +997,74 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                     </div>
                 </div>
             )}
+            
+            {/* ... Other Tabs (Students List, Subjects, Stats, etc.) - Preserving structure ... */}
 
+            {/* MIGRATION TAB */}
+            {activeTab === 'migration' && isAdmin && (
+                <div className="max-w-4xl mx-auto">
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 mb-8">
+                        <h3 className="text-xl font-bold text-emerald-900 mb-4 flex items-center gap-2"><Database/> นำเข้าข้อมูลเก่า (Migration)</h3>
+                        <p className="text-emerald-700 text-sm mb-6">เครื่องมือสำหรับนำเข้าข้อมูลจาก Firebase Realtime Database (JSON Export) เข้าสู่ Supabase</p>
+                        
+                        <div className="grid md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">1. เลือกประเภทข้อมูลที่ต้องการนำเข้า</label>
+                                <select value={migrationTarget} onChange={e => setMigrationTarget(e.target.value)} className="w-full p-3 border rounded-xl bg-white mb-4">
+                                    <option value="auto">⚡ Auto Detect (ตรวจสอบอัตโนมัติ)</option>
+                                    <option value="students">👨‍🎓 นักเรียน (Students)</option>
+                                    <option value="teachers">👩‍🏫 ครู/บุคลากร (Teachers)</option>
+                                    <option value="questions">📝 ข้อสอบ (Questions)</option>
+                                    <option value="schools">🏫 โรงเรียน (Schools)</option>
+                                    <option value="subjects">📚 วิชา (Subjects)</option>
+                                </select>
+
+                                <label className="block text-sm font-bold text-gray-700 mb-2">2. เลือกไฟล์ JSON</label>
+                                <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center bg-gray-50 hover:bg-white transition cursor-pointer relative">
+                                    <input 
+                                        type="file" 
+                                        accept=".json" 
+                                        onChange={e => setMigrationFile(e.target.files?.[0] || null)}
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                    />
+                                    <UploadCloud size={32} className="mx-auto text-gray-400 mb-2"/>
+                                    {migrationFile ? (
+                                        <span className="font-bold text-emerald-600">{migrationFile.name}</span>
+                                    ) : (
+                                        <span className="text-gray-500 text-sm">คลิกเพื่อเลือกไฟล์ .json</span>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="flex flex-col justify-end">
+                                <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-xs text-yellow-800 mb-4">
+                                    <strong className="flex items-center gap-1 mb-1"><AlertTriangle size={14}/> คำเตือน:</strong>
+                                    ข้อมูลที่มี ID ซ้ำกันจะถูกเขียนทับ (Upsert) กรุณาตรวจสอบความถูกต้องก่อนนำเข้า
+                                </div>
+                                <button 
+                                    onClick={handleMigration}
+                                    disabled={!migrationFile || isMigrating}
+                                    className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    {isMigrating ? <RefreshCw className="animate-spin"/> : <Database/>}
+                                    {isMigrating ? 'กำลังนำเข้าข้อมูล...' : 'เริ่มนำเข้าข้อมูล'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Logs */}
+                    <div className="bg-slate-900 rounded-xl p-4 text-xs font-mono text-slate-300 h-64 overflow-y-auto border border-slate-700 shadow-inner">
+                        <div className="text-slate-500 border-b border-slate-700 pb-2 mb-2">Migration Logs...</div>
+                        {migrationLog.length === 0 ? (
+                            <div className="opacity-30 italic">Ready to start...</div>
+                        ) : (
+                            migrationLog.map((log, i) => <div key={i} className="mb-1">{log}</div>)
+                        )}
+                    </div>
+                </div>
+            )}
+            
             {/* STUDENTS TAB - List View */}
             {activeTab === 'students' && viewLevel === 'LIST' && (
                 <div className="grid md:grid-cols-2 gap-8 animate-fade-in">
@@ -978,7 +1155,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
             {/* SUBJECTS TAB */}
             {activeTab === 'subjects' && (
                 <div className="max-w-4xl mx-auto animate-fade-in">
-                    <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><Library className="text-pink-600"/> จัดการรายวิชา</h3>
+                    <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><List className="text-pink-600"/> จัดการรายวิชา</h3>
                     
                     <div className="bg-pink-50 p-6 rounded-2xl border border-pink-100 mb-8">
                         <h4 className="font-bold text-pink-800 mb-4 flex items-center gap-2"><PlusCircle size={18}/> เพิ่มวิชาใหม่</h4>

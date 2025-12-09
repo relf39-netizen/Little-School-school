@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Question, Teacher, SubjectConfig } from '../types';
 import { ArrowLeft, Play, Layers, Shuffle, GraduationCap } from 'lucide-react';
-import { db } from '../services/firebaseConfig';
+import { supabase } from '../services/firebaseConfig'; // Using Supabase Client
 import { getSubjects, getQuestionsBySubject } from '../services/api';
 
 interface GameSetupProps {
@@ -15,7 +15,6 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
   const [availableSubjects, setAvailableSubjects] = useState<SubjectConfig[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Settings
   const [selectedSubject, setSelectedSubject] = useState<string>('MIXED'); 
   const [questionCount, setQuestionCount] = useState<number>(10);
   const [timePerQuestion, setTimePerQuestion] = useState<number>(20);
@@ -31,7 +30,6 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
 
   useEffect(() => {
     const loadData = async () => {
-      // 🟢 Optimized: Load subjects ONLY. Do NOT load all questions.
       const subs = await getSubjects(teacher.school);
       setAvailableSubjects(subs);
       setLoading(false);
@@ -48,10 +46,7 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
 
     let finalQuestions: Question[] = [];
 
-    // 🟢 Optimized: Fetch questions on demand based on selection
     if (selectedSubject === 'MIXED') {
-        // Warning: MIXED still requires fetching a lot if we want true random.
-        // Strategy: Fetch a few from each available subject.
         for (const sub of availableSubjects) {
             const qs = await getQuestionsBySubject(sub.name);
             finalQuestions.push(...qs);
@@ -60,7 +55,6 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
         finalQuestions = await getQuestionsBySubject(selectedSubject);
     }
 
-    // Filter by grade and school after fetching specific subjects
     let filtered = finalQuestions.filter(q => 
         (q.grade === selectedGrade || q.grade === 'ALL') &&
         (q.school === teacher.school || q.school === 'CENTER' || q.school === 'Admin')
@@ -75,45 +69,29 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
         return;
     }
 
-    // ✅ Strict Sanitization to prevent Firebase "undefined" error
-    const sanitizedQuestions = selectedQuestions.map((q, idx) => ({
-        id: String(q.id || `q${idx}`),
-        subject: q.subject ? String(q.subject) : 'GENERAL',
-        text: q.text ? String(q.text) : '',
-        image: q.image ? String(q.image) : '',
-        choices: (Array.isArray(q.choices) ? q.choices : []).map((c, cIdx) => ({
-            id: c.id ? String(c.id).trim() : `c${cIdx}`,
-            text: c.text ? String(c.text) : '',
-            image: c.image ? String(c.image) : '' 
-        })),
-        correctChoiceId: q.correctChoiceId ? String(q.correctChoiceId).trim() : '',
-        explanation: q.explanation ? String(q.explanation) : '',
-        grade: q.grade ? String(q.grade) : 'ALL',
-        school: q.school ? String(q.school) : 'CENTER'
-    }));
-
     try {
         const roomCode = generateRoomCode();
-        const roomPath = `games/${roomCode}`;
         
-        await db.ref(`${roomPath}/scores`).set({});
-        await db.ref(`${roomPath}/questions`).set(sanitizedQuestions);
-        await db.ref(`${roomPath}/gameState`).set({
+        // Supabase Insert for Game
+        const { error } = await supabase.from('games').insert([{
+            room_code: roomCode,
             status: 'LOBBY',
-            currentQuestionIndex: 0,
-            totalQuestions: sanitizedQuestions.length,
+            current_question_index: 0,
+            total_questions: selectedQuestions.length,
             subject: selectedSubject === 'MIXED' ? 'รวมวิชา' : selectedSubject,
             grade: selectedGrade,
-            timePerQuestion: timePerQuestion,
+            time_per_question: timePerQuestion,
             timer: timePerQuestion,
-            schoolId: teacher.school, 
-            teacherName: teacher.name
-        });
+            school_id: teacher.school,
+            questions: selectedQuestions // Store JSONB snapshot
+        }]);
+
+        if (error) throw error;
         
         onGameCreated(roomCode); 
-    } catch (e) {
-        console.error("Firebase Error:", e);
-        alert("เกิดข้อผิดพลาดในการสร้างห้อง: " + e);
+    } catch (e: any) {
+        console.error("Supabase Error:", e);
+        alert("เกิดข้อผิดพลาดในการสร้างห้อง: " + e.message);
     } finally {
         setLoading(false);
     }
@@ -166,7 +144,7 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
                     </button>
                 )) : (
                     <div className="col-span-2 text-center text-sm text-gray-400 p-2 border border-dashed rounded-xl">
-                        ยังไม่มีรายวิชา (เพิ่มได้ที่เมนูจัดการรายวิชา)
+                        ยังไม่มีรายวิชา
                     </div>
                 )}
             </div>
@@ -176,38 +154,23 @@ const GameSetup: React.FC<GameSetupProps> = ({ teacher, onBack, onGameCreated })
             <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">จำนวนข้อ</label>
                 <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-xl border">
-                    <input 
-                        type="range" min="5" max="50" step="5"
-                        value={questionCount} 
-                        onChange={(e) => setQuestionCount(parseInt(e.target.value))}
-                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
-                    />
+                    <input type="range" min="5" max="50" step="5" value={questionCount} onChange={(e) => setQuestionCount(parseInt(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600" />
                     <span className="font-bold text-purple-600 min-w-[30px] text-center">{questionCount}</span>
                 </div>
             </div>
             <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">เวลาต่อข้อ (วินาที)</label>
-                <select 
-                    value={timePerQuestion}
-                    onChange={(e) => setTimePerQuestion(parseInt(e.target.value))}
-                    className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-gray-700"
-                >
-                    <option value="10">10 วินาที (เร็ว)</option>
-                    <option value="15">15 วินาที</option>
-                    <option value="20">20 วินาที (ปกติ)</option>
-                    <option value="30">30 วินาที (ช้า)</option>
+                <select value={timePerQuestion} onChange={(e) => setTimePerQuestion(parseInt(e.target.value))} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-gray-700">
+                    <option value="10">10 วินาที</option>
+                    <option value="20">20 วินาที</option>
+                    <option value="30">30 วินาที</option>
                 </select>
             </div>
         </div>
 
-        <button 
-            onClick={handleCreateGame}
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-2xl font-bold text-xl shadow-lg hover:scale-[1.02] transition flex items-center justify-center gap-2"
-        >
+        <button onClick={handleCreateGame} disabled={loading} className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-2xl font-bold text-xl shadow-lg hover:scale-[1.02] transition flex items-center justify-center gap-2">
             {loading ? 'กำลังสร้างห้อง...' : <><Play fill="currentColor" /> เปิดห้องแข่งขัน</>}
         </button>
-
       </div>
     </div>
   );
