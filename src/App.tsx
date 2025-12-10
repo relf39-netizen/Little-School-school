@@ -1,5 +1,4 @@
 
-
 import React, { useState } from 'react';
 import Layout from './components/Layout';
 import Login from './views/Login';
@@ -30,7 +29,8 @@ const App: React.FC = () => {
       total: number, 
       isHomework: boolean, 
       isGame: boolean,
-      earnedToken?: boolean,
+      earnedEffortToken?: boolean,
+      earnedPerfectToken?: boolean,
       unlockedReward?: string | null,
       leveledUp?: boolean
   } | null>(null);
@@ -47,7 +47,8 @@ const App: React.FC = () => {
   // List of Possible Rewards
   const REWARD_POOL = [
       'ดาบอัศวิน', 'โล่ป้องกัน', 'หมวกพ่อมด', 'ตุ๊กตาหมี', 
-      'เหรียญทองคำ', 'มงกุฎราชา', 'รองเท้าสายฟ้า', 'หนังสือเวทมนตร์'
+      'เหรียญทองคำ', 'มงกุฎราชา', 'รองเท้าสายฟ้า', 'หนังสือเวทมนตร์',
+      'น้ำยาวิเศษ', 'แผนที่สมบัติ', 'ไข่มังกร', 'หีบสมบัติ'
   ];
 
   const handleLogin = async (student: Student) => { 
@@ -90,83 +91,80 @@ const App: React.FC = () => {
     const isGame = source === 'game';
     const subjectToSave = currentAssignment ? currentAssignment.subject : (selectedSubject || 'รวมวิชา');
     
-    // --- GAMIFICATION LOGIC ---
+    // --- 🟢 GAMIFICATION LOGIC (UPDATED) ---
+    // Rule:
+    // 1. Every 5 attempts -> +1 Star (Effort)
+    // 2. Full Score (10/10 or 100%) -> +1 Additional Star (Excellence)
+    // 3. Collect 10 Stars -> Get Prize & Reset
+
+    const STARS_TARGET = 10;
+    
     let newQuizCount = (currentUser.quizCount || 0) + 1;
-    let newTokens = currentUser.tokens || 0;
+    let newTokens = currentUser.tokens || 0; // "Tokens" = "Stars" in this context
     let newLevel = currentUser.level || 1;
     let newInventory = [...(currentUser.inventory || [])];
     
-    let earnedToken = false;
+    let earnedEffortToken = false;
+    let earnedPerfectToken = false;
+    let leveledUp = false; // Used for "Prize Unlocked"
     let unlockedReward: string | null = null;
-    let leveledUp = false;
 
-    // 1. Every 5 quizzes -> Get 1 Token
+    // 1. Effort Reward: Every 5th attempt
     if (newQuizCount % 5 === 0) {
         newTokens += 1;
-        earnedToken = true;
+        earnedEffortToken = true;
     }
 
-    // 2. 6th quiz onwards: If Full Score -> Get 1 Token
-    const isFullScore = score === total && total > 0;
-    if (newQuizCount > 5 && isFullScore) {
+    // 2. Excellence Reward: Full Score
+    const isFullScore = total > 0 && score === total;
+    if (isFullScore) {
         newTokens += 1;
-        earnedToken = true; // Could be double token if matches rule #1 too
+        earnedPerfectToken = true; 
     }
 
-    // 3. Level Up Condition: Every 5 Tokens
-    if (newTokens >= 5) {
-        // Exchange 5 tokens for 1 level up? Or Accumulate?
-        // Prompt says: "Accumulate 5 stars -> Give reward".
-        // Let's deduce 5 tokens to buy level up/reward.
-        newTokens -= 5; 
-        newLevel += 1;
-        leveledUp = true;
+    // 3. Prize Logic: Reach 10 Stars
+    if (newTokens >= STARS_TARGET) {
+        newTokens -= STARS_TARGET; // Pay 10 stars
+        // newLevel += 1; // Optional: Increase level when getting prize
+        leveledUp = true; // Use this flag to trigger the "Prize" animation in Results
         
-        // Unlock Reward
+        // Unlock Random Reward
         const randomReward = REWARD_POOL[Math.floor(Math.random() * REWARD_POOL.length)];
-        // Add to inventory if not exists (or allow duplicates? let's allow duplicates for now or unique)
-        if (!newInventory.includes(randomReward)) {
-            newInventory.push(randomReward);
-            unlockedReward = randomReward;
-        } else {
-             // Fallback reward
-             unlockedReward = 'โพชั่นเพิ่มพลัง';
-             newInventory.push('โพชั่นเพิ่มพลัง');
-        }
+        newInventory.push(randomReward);
+        unlockedReward = randomReward;
     }
+    // --- 🟢 GAMIFICATION LOGIC END ---
 
-    setLastScore({ score, total, isHomework, isGame, earnedToken, unlockedReward, leveledUp });
+    setLastScore({ score, total, isHomework, isGame, earnedEffortToken, earnedPerfectToken, unlockedReward, leveledUp });
     setCurrentPage('results');
     
-    // Update Local State
+    // Update Local State immediately for UI responsiveness
     const updatedStudent = { 
         ...currentUser, 
-        stars: currentUser.stars + score, // Existing logic (score = XP)
+        stars: currentUser.stars + score, // Score still adds to EXP
         quizCount: newQuizCount,
-        tokens: newTokens, // The remaining tokens after leveling up
+        tokens: newTokens, 
         level: newLevel,
         inventory: newInventory
     };
     setCurrentUser(updatedStudent);
 
     if (isGame) {
-         // Game doesn't save results to permanent history usually, but we might want to update stats?
-         // For now, prompt says game gives stars too. Let's update stats but NOT examResult history to avoid clutter.
-         // Actually, let's just update the Student Stats in Firebase.
+         // Just update stats in Firebase, no ExamResult entry
          await saveScore(
             currentUser.id, 
             currentUser.name, 
             currentUser.school || '-', 
-            score, // Adds to existing stars
+            score, 
             total, 
-            'GAME_MODE', // Fake subject for game
+            'GAME_MODE', 
             undefined,
             { quizCount: newQuizCount, tokens: newTokens, level: newLevel, inventory: newInventory }
          );
          return; 
     }
 
-    // Normal Save
+    // Normal Save with Exam Result
     await saveScore(
          currentUser.id, 
          currentUser.name, 
@@ -295,7 +293,8 @@ const App: React.FC = () => {
                 total={lastScore?.total || 0} 
                 isHomework={lastScore?.isHomework} 
                 isGame={lastScore?.isGame} 
-                earnedToken={lastScore?.earnedToken}
+                earnedEffortToken={lastScore?.earnedEffortToken}
+                earnedPerfectToken={lastScore?.earnedPerfectToken}
                 unlockedReward={lastScore?.unlockedReward}
                 leveledUp={lastScore?.leveledUp}
                 onRetry={() => setCurrentPage('dashboard')} 

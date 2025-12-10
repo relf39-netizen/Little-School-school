@@ -1,8 +1,6 @@
 
-
-
 import React, { useEffect, useState } from 'react';
-import { Star, RefreshCw, Home, CheckCircle, Clock, Gift, Crown, ArrowUpCircle } from 'lucide-react';
+import { Star, RefreshCw, Home, CheckCircle, Clock, Gift, ArrowUpCircle, Zap } from 'lucide-react';
 import { speak } from '../utils/soundUtils';
 
 interface ResultsProps {
@@ -10,14 +8,15 @@ interface ResultsProps {
   total: number;
   isHomework?: boolean;
   isGame?: boolean; 
-  earnedToken?: boolean;
+  earnedEffortToken?: boolean;
+  earnedPerfectToken?: boolean;
   unlockedReward?: string | null;
   leveledUp?: boolean;
   onRetry: () => void;
   onHome: () => void;
 }
 
-const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isGame = false, earnedToken, unlockedReward, leveledUp, onRetry, onHome }) => {
+const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isGame = false, earnedEffortToken, earnedPerfectToken, unlockedReward, leveledUp, onRetry, onHome }) => {
   const percentage = (score / total) * 100;
   const [countdown, setCountdown] = useState(10);
   const [showReward, setShowReward] = useState(false);
@@ -29,8 +28,8 @@ const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isG
         speechText = "ยินดีด้วยครับ คุณได้เลื่อนระดับใหม่แล้ว! ";
     }
     
-    if (earnedToken) {
-        speechText += "คุณได้รับดาวพิเศษเพิ่มอีก 1 ดวง! ";
+    if (earnedEffortToken || earnedPerfectToken) {
+        speechText += "คุณได้รับดาวสะสมเพิ่ม! ";
     }
 
     if (percentage >= 80) {
@@ -66,12 +65,29 @@ const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isG
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [score, total, percentage, isHomework, onHome, leveledUp, earnedToken, unlockedReward]);
+  }, [score, total, percentage, isHomework, onHome, leveledUp, earnedEffortToken, earnedPerfectToken, unlockedReward]);
+
+  const getRewardIcon = (name: string) => {
+      if (!name) return '🎁';
+      if (name.includes('ดาบ')) return '⚔️';
+      if (name.includes('โล่')) return '🛡️';
+      if (name.includes('หมวก')) return '🧙‍♂️';
+      if (name.includes('ตุ๊กตา')) return '🧸';
+      if (name.includes('เหรียญ')) return '🪙';
+      if (name.includes('มงกุฎ')) return '👑';
+      if (name.includes('รองเท้า')) return '👢';
+      if (name.includes('หนังสือ')) return '📘';
+      if (name.includes('น้ำยา') || name.includes('โพชั่น')) return '🧪';
+      if (name.includes('แผนที่')) return '🗺️';
+      if (name.includes('หีบ')) return '⚱️';
+      if (name.includes('ไข่')) return '🥚';
+      return '🎁';
+  };
 
   return (
     <div className="flex flex-col items-center text-center py-10 min-h-[70vh] justify-center relative overflow-hidden">
       
-      {/* REWARD MODAL */}
+      {/* 🟢 REWARD MODAL */}
       {showReward && unlockedReward && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
               <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center relative border-4 border-yellow-400 shadow-[0_0_50px_rgba(250,204,21,0.5)]">
@@ -82,7 +98,7 @@ const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isG
                   <p className="text-gray-500 mb-6">คุณได้รับของรางวัลจากการเลื่อนระดับ</p>
                   
                   <div className="bg-yellow-50 p-6 rounded-2xl border-2 border-yellow-200 mb-6 transform hover:scale-105 transition duration-300">
-                      <div className="text-5xl mb-2">🎁</div>
+                      <div className="text-6xl mb-4 drop-shadow-md">{getRewardIcon(unlockedReward)}</div>
                       <div className="font-bold text-xl text-yellow-800">{unlockedReward}</div>
                   </div>
                   
@@ -125,25 +141,39 @@ const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isG
         </div>
       </div>
 
-      {/* GAMIFICATION FEEDBACK */}
+      {/* 🟢 GAMIFICATION FEEDBACK */}
       <div className="flex flex-col gap-3 w-full max-w-sm mb-6">
           {leveledUp && (
               <div className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white p-4 rounded-2xl shadow-lg flex items-center gap-4 animate-fade-in border-b-4 border-indigo-800">
                   <div className="bg-white/20 p-2 rounded-full"><ArrowUpCircle size={32} /></div>
                   <div className="text-left">
                       <div className="font-bold text-lg">LEVEL UP!</div>
-                      <div className="text-xs text-purple-100">ความยากระดับถัดไปรออยู่!</div>
+                      <div className="text-xs text-purple-100">ใช้ 10 ดาวแลกของรางวัลแล้ว</div>
                   </div>
               </div>
           )}
           
-          {earnedToken && !leveledUp && (
-              <div className="bg-yellow-100 text-yellow-800 p-4 rounded-2xl border-2 border-yellow-300 shadow-sm flex items-center gap-4 animate-pulse">
-                   <div className="bg-yellow-400 p-2 rounded-full text-white"><Star fill="currentColor" size={24}/></div>
-                   <div className="text-left">
-                       <div className="font-bold">ได้รับดาวพิเศษ +1</div>
-                       <div className="text-xs">สะสมครบ 5 ดวงเพื่ออัปเลเวล</div>
+          {/* Card 1: Effort Star */}
+          {earnedEffortToken && (
+              <div className="bg-blue-100 text-blue-800 p-3 rounded-2xl border-2 border-blue-200 shadow-sm flex items-center gap-3 animate-slide-up">
+                   <div className="bg-blue-500 p-2 rounded-full text-white"><Zap fill="currentColor" size={20}/></div>
+                   <div className="text-left flex-1">
+                       <div className="font-bold text-sm">ขยันมาก!</div>
+                       <div className="text-xs text-blue-600">เล่นครบ 5 รอบ รับดาว +1</div>
                    </div>
+                   <div className="text-xl font-black text-blue-500">+1</div>
+              </div>
+          )}
+
+          {/* Card 2: Perfect Score Star */}
+          {earnedPerfectToken && (
+              <div className="bg-yellow-100 text-yellow-800 p-3 rounded-2xl border-2 border-yellow-300 shadow-sm flex items-center gap-3 animate-slide-up" style={{animationDelay: '0.2s'}}>
+                   <div className="bg-yellow-400 p-2 rounded-full text-white"><Star fill="currentColor" size={20}/></div>
+                   <div className="text-left flex-1">
+                       <div className="font-bold text-sm">เก่งทะลุโลก!</div>
+                       <div className="text-xs text-yellow-700">คะแนนเต็ม รับดาว +1</div>
+                   </div>
+                   <div className="text-xl font-black text-yellow-500">+1</div>
               </div>
           )}
       </div>

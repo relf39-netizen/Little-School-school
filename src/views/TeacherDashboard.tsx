@@ -1924,11 +1924,20 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                             <div className="mt-3 bg-indigo-50 p-2 rounded-lg border border-indigo-100">
                                                 <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 mb-1"><Crown size={12}/> ผลการทดสอบ O-NET (จำลอง)</div>
                                                 <div className="grid grid-cols-2 gap-1">
-                                                    {gStats.onetBreakdown.map(o => (
-                                                        <div key={o.subject} className={`text-[10px] px-1 py-0.5 rounded text-center border ${o.score >= 50 ? 'bg-white border-indigo-200 text-indigo-900' : 'bg-red-50 border-red-100 text-red-500'}`}>
-                                                            {o.subject.substring(0, 4)}.. <b>{o.score}</b>
-                                                        </div>
-                                                    ))}
+                                                    {gStats.onetBreakdown.map(o => {
+                                                        let label = o.subject;
+                                                        if (o.subject === 'ภาษาอังกฤษ') label = 'Eng';
+                                                        else if (o.subject === 'ภาษาไทย') label = 'ไทย';
+                                                        else if (o.subject === 'คณิตศาสตร์') label = 'คณิต';
+                                                        else if (o.subject === 'วิทยาศาสตร์') label = 'วิทย์';
+                                                        else label = o.subject.substring(0, 6);
+
+                                                        return (
+                                                            <div key={o.subject} className={`text-[10px] px-1 py-0.5 rounded text-center border ${o.score >= 50 ? 'bg-white border-indigo-200 text-indigo-900' : 'bg-red-50 border-red-100 text-red-500'}`}>
+                                                                {label} <b>{o.score}</b>
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
                                         )}

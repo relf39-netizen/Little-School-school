@@ -1,6 +1,4 @@
 
-
-
 import React, { useState } from 'react';
 import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles, RefreshCw, Trophy, Sword, Crown, Gift, Backpack } from 'lucide-react';
 import { Student, Assignment, ExamResult, SubjectConfig } from '../types';
@@ -143,7 +141,10 @@ const Dashboard: React.FC<DashboardProps> = ({
                              item.includes('เหรียญ') ? '🪙' :
                              item.includes('รองเท้า') ? '👢' :
                              item.includes('หนังสือ') ? '📘' :
-                             item.includes('โพชั่น') ? '🧪' : '🎁'}
+                             item.includes('โพชั่น') || item.includes('น้ำยา') ? '🧪' :
+                             item.includes('แผนที่') ? '🗺️' :
+                             item.includes('หีบ') ? '⚱️' :
+                             item.includes('ไข่') ? '🥚' : '🎁'}
                           </div>
                           <div className="font-bold text-gray-700 text-sm">{item}</div>
                           <div className="text-[10px] text-gray-400 mt-1 bg-gray-50 px-2 py-0.5 rounded-full">Rare Item</div>
@@ -289,45 +290,51 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div>
                     <h2 className="text-2xl font-bold mb-1">สวัสดี, {student.name.split(' ')[0]}!</h2>
                     <div className="flex gap-2 text-indigo-100 items-center text-sm">
-                        <span>สู้ต่อไปนะ! อีกนิดเดียวก็จะเลเวลอัพแล้ว</span>
+                        <span>สู้ต่อไปนะ! สะสมดาวให้ครบ 10 ดวงเพื่อรับรางวัล</span>
                     </div>
                 </div>
             </div>
 
-            {/* Gamification Bar */}
-            <div className="bg-black/20 rounded-2xl p-4 flex justify-between items-center backdrop-blur-sm">
-                <div className="text-center border-r border-white/20 pr-4 flex-1">
-                    <div className="text-xs text-indigo-200 mb-1 font-bold uppercase">ดาวสะสม</div>
-                    <div className="flex items-center justify-center gap-1">
-                        <Star className="text-yellow-300 fill-yellow-300" size={20} />
-                        <span className="font-black text-xl">{student.tokens || 0}<span className="text-sm opacity-50">/5</span></span>
+            {/* 🟢 GAMIFICATION: STAR STAMP CARD */}
+            <div className="bg-black/20 rounded-2xl p-4 backdrop-blur-sm mb-3">
+                <div className="flex justify-between items-center mb-2">
+                    <div className="text-xs text-indigo-200 font-bold uppercase flex items-center gap-1">
+                        <Star size={12} className="text-yellow-300 fill-yellow-300"/> บัตรสะสมดาว
                     </div>
+                    <div className="text-xs text-indigo-200 font-mono">{student.tokens || 0}/10</div>
                 </div>
-                <div className="text-center border-r border-white/20 px-4 flex-1">
-                    <div className="text-xs text-indigo-200 mb-1 font-bold uppercase">เล่นไปแล้ว</div>
-                    <div className="flex items-center justify-center gap-1">
-                        <Gamepad2 className="text-green-300" size={20} />
-                        <span className="font-black text-xl">{student.quizCount || 0}<span className="text-sm opacity-50"> ครั้ง</span></span>
-                    </div>
+                {/* 10 Star Slots Grid */}
+                <div className="grid grid-cols-10 gap-1.5">
+                    {Array.from({ length: 10 }).map((_, index) => {
+                        const hasStar = index < (student.tokens || 0);
+                        return (
+                            <div key={index} className={`aspect-square rounded-full flex items-center justify-center border-2 transition-all ${hasStar ? 'bg-yellow-400 border-yellow-200 shadow-[0_0_10px_rgba(250,204,21,0.6)] transform scale-110' : 'bg-black/30 border-white/10'}`}>
+                                <Star size={14} className={hasStar ? 'text-yellow-900 fill-yellow-900' : 'text-white/20'} />
+                            </div>
+                        );
+                    })}
                 </div>
-                <div onClick={() => setView('inventory')} className="text-center pl-4 flex-1 cursor-pointer hover:bg-white/10 rounded-lg p-1 transition">
-                    <div className="text-xs text-indigo-200 mb-1 font-bold uppercase">กระเป๋าของฉัน</div>
-                    <div className="flex items-center justify-center gap-1">
-                        <Backpack className="text-orange-300" size={20} />
-                        <span className="font-black text-xl">{(student.inventory || []).length}</span>
-                    </div>
+                <div className="flex justify-between items-center text-[10px] text-indigo-200 mt-2 px-1">
+                    <span>สะสมครบ 10 ดวง รับรางวัลทันที!</span>
+                    <span className="bg-white/10 px-2 py-0.5 rounded">อีก {5 - ((student.quizCount || 0) % 5)} รอบ รับดาวความขยัน</span>
                 </div>
             </div>
             
-            {/* Progress to next reward */}
-            <div className="mt-3">
-                 <div className="flex justify-between text-[10px] text-indigo-200 mb-1">
-                     <span>Progress to Next Level</span>
-                     <span>{(student.tokens || 0) * 20}%</span>
-                 </div>
-                 <div className="w-full bg-black/30 h-2 rounded-full overflow-hidden">
-                     <div className="bg-yellow-400 h-full transition-all duration-500" style={{ width: `${(student.tokens || 0) * 20}%` }}></div>
-                 </div>
+            <div className="flex gap-2">
+                <div className="text-center bg-white/10 rounded-lg p-2 flex-1">
+                    <div className="text-[10px] text-indigo-200 uppercase mb-1">เล่นไปแล้ว</div>
+                    <div className="flex items-center justify-center gap-1">
+                        <Gamepad2 className="text-green-300" size={16} />
+                        <span className="font-bold text-sm">{student.quizCount || 0} ครั้ง</span>
+                    </div>
+                </div>
+                <div onClick={() => setView('inventory')} className="text-center bg-white/10 rounded-lg p-2 flex-1 cursor-pointer hover:bg-white/20 transition">
+                    <div className="text-[10px] text-indigo-200 uppercase mb-1">กระเป๋าของฉัน</div>
+                    <div className="flex items-center justify-center gap-1">
+                        <Backpack className="text-orange-300" size={16} />
+                        <span className="font-bold text-sm">{(student.inventory || []).length} ชิ้น</span>
+                    </div>
+                </div>
             </div>
         </div>
       </div>
