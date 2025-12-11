@@ -319,8 +319,14 @@ export const editQuestion = async (q: any) => {
             { id: '1', text: q.c1 }, { id: '2', text: q.c2 }, { id: '3', text: q.c3 }, { id: '4', text: q.c4 }
         ]),
         correct_choice_id: q.correct,
-        explanation: q.explanation
+        explanation: q.explanation,
+        // Optional: Update teacherId if ownership changes, but usually not needed for edits
+        // teacher_id: q.teacherId 
     }).eq('id', q.id);
+    
+    if (error) {
+        console.error("Edit Question Error:", error);
+    }
     return !error;
 };
 
@@ -367,11 +373,25 @@ export const getSubjects = async (school: string) => {
     return (data || []).map((s:any) => ({...s, teacherId: s.teacher_id}));
 };
 
-export const addSubject = async (school: string, sub: SubjectConfig) => {
-    const { error } = await supabase.from('subjects').insert({
-        name: sub.name, school, teacher_id: sub.teacherId, grade: sub.grade, icon: sub.icon, color: sub.color
-    });
-    return !error;
+// ✅ Fix: Return error message and include ID in insert
+export const addSubject = async (school: string, sub: SubjectConfig): Promise<{success: boolean, message?: string}> => {
+    try {
+        const { error } = await supabase.from('subjects').insert({
+            id: sub.id, // Explicitly send ID as text
+            name: sub.name, 
+            school, 
+            teacher_id: sub.teacherId, 
+            grade: sub.grade, 
+            icon: sub.icon, 
+            color: sub.color
+        });
+        
+        if (error) throw error;
+        return { success: true };
+    } catch (e: any) {
+        console.error("Add Subject Error:", e);
+        return { success: false, message: e.message || e.toString() };
+    }
 };
 
 export const deleteSubject = async (school: string, id: string) => {
