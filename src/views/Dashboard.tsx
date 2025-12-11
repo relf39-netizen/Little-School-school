@@ -74,13 +74,16 @@ const Dashboard: React.FC<DashboardProps> = ({
       return (resultB?.timestamp || 0) - (resultA?.timestamp || 0);
   });
 
-  // ✅ กรองรายวิชา: พยายามกรองตามชั้นเรียนก่อน
-  let mySubjects = subjects.filter(s => s.grade === 'ALL' || s.grade === student.grade);
+  // ✅ กรองรายวิชา: แสดงเฉพาะของโรงเรียนนักเรียน และ (ตรงระดับชั้น หรือ เป็น ALL)
+  const mySubjects = subjects.filter(s => {
+      // 1. ต้องตรงโรงเรียน (Trim เพื่อความชัวร์)
+      const subjectSchool = (s.school || '').trim();
+      const studentSchool = (student.school || '').trim();
+      if (subjectSchool !== studentSchool) return false;
 
-  // ✅ Fallback: ถ้ากรองแล้วไม่เจอ แต่ในโรงเรียนมีวิชา ให้แสดงทั้งหมด (เพื่อป้องกันหน้าจอโล่งกรณีตั้งค่าเกรดผิด)
-  if (mySubjects.length === 0 && subjects.length > 0) {
-      mySubjects = subjects;
-  }
+      // 2. ต้องตรงระดับชั้น หรือ เป็นวิชารวม (ALL)
+      return s.grade === 'ALL' || s.grade === student.grade;
+  });
 
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
@@ -314,33 +317,33 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div>
                     <h2 className="text-2xl font-bold mb-1">สวัสดี, {student.name.split(' ')[0]}!</h2>
                     <div className="flex gap-2 text-indigo-100 items-center text-sm">
-                        <span>สู้ต่อไปนะ! สะสมดาวให้ครบ 10 ดวงเพื่อรับรางวัล</span>
+                        <span>สู้ต่อไปนะ! สะสมดาวให้ครบ 5 ดวงเพื่อรับรางวัล</span>
                     </div>
                 </div>
             </div>
 
-            {/* 🟢 GAMIFICATION: STAR STAMP CARD */}
+            {/* 🟢 GAMIFICATION: STAR STAMP CARD (UPDATED TO 5 SLOTS) */}
             <div className="bg-black/20 rounded-2xl p-4 backdrop-blur-sm mb-3">
                 <div className="flex justify-between items-center mb-2">
                     <div className="text-xs text-indigo-200 font-bold uppercase flex items-center gap-1">
-                        <Star size={12} className="text-yellow-300 fill-yellow-300"/> บัตรสะสมดาว
+                        <Star size={12} className="text-yellow-300 fill-yellow-300"/> บัตรสะสมดาว (Level {student.level || 1})
                     </div>
-                    <div className="text-xs text-indigo-200 font-mono">{student.tokens || 0}/10</div>
+                    <div className="text-xs text-indigo-200 font-mono">{student.tokens || 0}/5</div>
                 </div>
-                {/* 10 Star Slots Grid */}
-                <div className="grid grid-cols-10 gap-1.5">
-                    {Array.from({ length: 10 }).map((_, index) => {
+                {/* 5 Star Slots Grid */}
+                <div className="grid grid-cols-5 gap-3">
+                    {Array.from({ length: 5 }).map((_, index) => {
                         const hasStar = index < (student.tokens || 0);
                         return (
                             <div key={index} className={`aspect-square rounded-full flex items-center justify-center border-2 transition-all ${hasStar ? 'bg-yellow-400 border-yellow-200 shadow-[0_0_10px_rgba(250,204,21,0.6)] transform scale-110' : 'bg-black/30 border-white/10'}`}>
-                                <Star size={14} className={hasStar ? 'text-yellow-900 fill-yellow-900' : 'text-white/20'} />
+                                <Star size={20} className={hasStar ? 'text-yellow-900 fill-yellow-900' : 'text-white/20'} />
                             </div>
                         );
                     })}
                 </div>
                 <div className="flex justify-between items-center text-[10px] text-indigo-200 mt-2 px-1">
-                    <span>สะสมครบ 10 ดวง รับรางวัลทันที!</span>
-                    <span className="bg-white/10 px-2 py-0.5 rounded">อีก {5 - ((student.quizCount || 0) % 5)} รอบ รับดาวความขยัน</span>
+                    <span className="flex items-center gap-1">⭐ สะสมครบ 5 ดาว แลกของรางวัล</span>
+                    <span className="bg-white/10 px-2 py-0.5 rounded">เล่นครบ 5 รอบ รับดาวความขยัน</span>
                 </div>
             </div>
             

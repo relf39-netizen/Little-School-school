@@ -71,30 +71,78 @@ const App: React.FC = () => {
   const handleTeacherLoginSuccess = (teacher: Teacher) => { setCurrentTeacher(teacher); setCurrentPage('teacher-dashboard'); };
   const handleLogout = () => { setCurrentUser(null); setCurrentTeacher(null); setCurrentPage('login'); setSelectedSubject(null); setCurrentAssignment(null); };
 
+  const getRandomReward = () => {
+      const rewards = ['ดาบวิเศษ', 'โล่ป้องกัน', 'หมวกพ่อมด', 'มงกุฎทองคำ', 'รองเท้าความเร็ว', 'หนังสือเวทย์', 'น้ำยาเพิ่มพลัง', 'แผนที่สมบัติ', 'หีบสมบัติ', 'ไข่มังกร'];
+      return rewards[Math.floor(Math.random() * rewards.length)];
+  };
+
   const handleFinishExam = async (score: number, total: number) => {
     // Gamification Logic
-    let perfect = score === total;
-    
-    // Save to backend
+    let isPerfect = score === total;
+    let earnedEffortToken = false;
+    let earnedPerfectToken = false;
+    let levelUp = false;
+    let reward: string | undefined = undefined;
+
     if (currentUser) {
-       const subjectToSave = currentAssignment ? currentAssignment.subject : (selectedSubject || 'รวมวิชา');
+        // 1. Calculate new Quiz Count
+        const newQuizCount = (currentUser.quizCount || 0) + 1;
+        
+        // 2. Logic: Earn Star for every 5 quizzes (Effort)
+        if (newQuizCount % 5 === 0) {
+            earnedEffortToken = true;
+        }
+
+        // 3. Logic: Earn Star for Perfect Score (Excellence)
+        if (isPerfect) {
+            earnedPerfectToken = true;
+        }
+
+        // 4. Calculate total stars to add
+        let starsToAdd = 0;
+        if (earnedEffortToken) starsToAdd++;
+        if (earnedPerfectToken) starsToAdd++;
+
+        // 5. Update Local State for Tokens & Level
+        let currentTokens = currentUser.tokens || 0;
+        let currentLevel = currentUser.level || 1;
+        let currentInventory = currentUser.inventory || [];
+
+        currentTokens += starsToAdd;
+
+        // 6. Level Up Logic (Max 5 Stars per level)
+        if (currentTokens >= 5) {
+            levelUp = true;
+            currentLevel++;
+            currentTokens = currentTokens - 5; // Carry over excess stars
+            reward = getRandomReward();
+            currentInventory = [...currentInventory, reward];
+        }
+
+        const subjectToSave = currentAssignment ? currentAssignment.subject : (selectedSubject || 'รวมวิชา');
        
-       await saveScore(
-         currentUser.id, 
-         currentUser.name, 
-         currentUser.school || '-', 
-         score, 
-         total,
-         subjectToSave,
-         currentAssignment ? currentAssignment.id : undefined,
-         // Pass gamification data if calculated
-       );
+        // Save to backend with updated gamification data
+        await saveScore(
+            currentUser.id, 
+            currentUser.name, 
+            currentUser.school || '-', 
+            score, 
+            total,
+            subjectToSave,
+            currentAssignment ? currentAssignment.id : undefined,
+            {
+                quizCount: newQuizCount,
+                tokens: currentTokens,
+                level: currentLevel,
+                inventory: currentInventory
+            }
+        );
        
-       // Refresh data
-       await refreshStudentData();
+        // Refresh data
+        await refreshStudentData();
     }
 
-    setLastScore({ score, total, perfect });
+    setLastScore({ score, total, perfect: isPerfect, effort: earnedEffortToken, levelUp, reward });
     setCurrentPage('results');
     setCurrentAssignment(null);
   };
@@ -155,7 +203,17 @@ const App: React.FC = () => {
           
           case 'game': return <GameMode student={currentUser!} onExit={() => setCurrentPage('dashboard')} onFinish={handleFinishExam}/>;
           
-          case 'results': return <Results score={lastScore?.score || 0} total={lastScore?.total || 0} isHomework={!!currentAssignment} onRetry={() => setCurrentPage('dashboard')} onHome={() => setCurrentPage('dashboard')} />;
+          case 'results': return <Results 
+              score={lastScore?.score || 0} 
+              total={lastScore?.total || 0} 
+              isHomework={!!currentAssignment} 
+              onRetry={() => setCurrentPage('dashboard')} 
+              onHome={() => setCurrentPage('dashboard')}
+              earnedEffortToken={lastScore?.effort}
+              earnedPerfectToken={lastScore?.perfect}
+              unlockedReward={lastScore?.reward}
+              leveledUp={lastScore?.levelUp}
+          />;
           
           case 'stats': return <Stats examResults={examResults} studentId={currentUser!.id} subjects={subjects} onBack={() => setCurrentPage('dashboard')} />;
           
