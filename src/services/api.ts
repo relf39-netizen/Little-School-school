@@ -41,7 +41,14 @@ export const teacherLogin = async (username: string, password: string): Promise<
         }
     }
 
-    return { success: true, teacher: data as Teacher };
+    // ✅ Map snake_case from DB to camelCase for App
+    const teacher: Teacher = {
+        ...data,
+        gradeLevel: data.grade_level,
+        citizenId: data.citizen_id
+    };
+
+    return { success: true, teacher };
   } catch (e) {
     console.error("Login error", e);
     return { success: false, message: 'Connection Error' };
@@ -157,13 +164,24 @@ export const manageStudent = async (params: any): Promise<{success: boolean, stu
 // Manage Teacher
 export const manageTeacher = async (params: any): Promise<{success: boolean, message?: string}> => {
     try {
+        // ✅ Create mapping payload manually to handle camelCase -> snake_case
+        const dbPayload: any = {};
+        if (params.name) dbPayload.name = params.name;
+        if (params.username) dbPayload.username = params.username;
+        if (params.password) dbPayload.password = params.password;
+        if (params.school) dbPayload.school = params.school;
+        if (params.role) dbPayload.role = params.role;
+        // Fix: Map gradeLevel to grade_level
+        if (params.gradeLevel) dbPayload.grade_level = params.gradeLevel;
+        // Fix: Map citizenId to citizen_id
+        if (params.citizenId) dbPayload.citizen_id = params.citizenId;
+
         if (params.action === 'add') {
-             const { action, ...data } = params;
-             const { error } = await supabase.from('teachers').insert([data]);
+             const { error } = await supabase.from('teachers').insert([dbPayload]);
              if (error) throw error;
         } else if (params.action === 'edit') {
-             const { action, id, ...data } = params;
-             const { error } = await supabase.from('teachers').update(data).eq('id', id);
+             const { id } = params;
+             const { error } = await supabase.from('teachers').update(dbPayload).eq('id', id);
              if (error) throw error;
         } else if (params.action === 'delete') {
              const { error } = await supabase.from('teachers').delete().eq('id', params.id);
@@ -171,13 +189,19 @@ export const manageTeacher = async (params: any): Promise<{success: boolean, mes
         }
         return { success: true };
     } catch (e: any) {
-        return { success: false, message: e.message };
+        console.error("Manage teacher error:", e);
+        return { success: false, message: e.message || e.toString() };
     }
 };
 
 export const getAllTeachers = async (): Promise<Teacher[]> => {
     const { data } = await supabase.from('teachers').select('*');
-    return data || [];
+    // ✅ Map snake_case to camelCase
+    return (data || []).map((t: any) => ({
+        ...t,
+        gradeLevel: t.grade_level,
+        citizenId: t.citizen_id
+    }));
 }
 
 // Manage Schools
