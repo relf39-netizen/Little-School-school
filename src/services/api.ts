@@ -74,7 +74,14 @@ export const verifyStudentLogin = async (code: string): Promise<{student?: Stude
         }
     }
 
-    return { student: data as Student };
+    // Map snake_case back to camelCase if needed, though students table is mostly standard
+    const student: Student = {
+        ...data,
+        teacherId: data.teacher_id,
+        quizCount: data.quiz_count
+    };
+
+    return { student };
   } catch (e) {
     return { error: 'Connection Error' };
   }
@@ -135,28 +142,59 @@ export const getTeacherDashboard = async (school: string) => {
 // Manage Student
 export const manageStudent = async (params: any): Promise<{success: boolean, student?: Student}> => {
     try {
+        // ✅ Map camelCase to snake_case for DB
+        const dbPayload: any = {};
+        if (params.name !== undefined) dbPayload.name = params.name;
+        if (params.school !== undefined) dbPayload.school = params.school;
+        if (params.avatar !== undefined) dbPayload.avatar = params.avatar;
+        if (params.grade !== undefined) dbPayload.grade = params.grade;
+        if (params.stars !== undefined) dbPayload.stars = params.stars;
+        
+        // Mapping specific fields
+        if (params.teacherId !== undefined) dbPayload.teacher_id = params.teacherId;
+        if (params.quizCount !== undefined) dbPayload.quiz_count = params.quizCount;
+        if (params.tokens !== undefined) dbPayload.tokens = params.tokens;
+        if (params.level !== undefined) dbPayload.level = params.level;
+        if (params.inventory !== undefined) dbPayload.inventory = params.inventory;
+
         if (params.action === 'add') {
              // Generate ID if not provided (simple 5 digit)
              const id = Math.floor(10000 + Math.random() * 90000).toString();
-             const newStudent = { ...params, id };
-             delete newStudent.action;
+             dbPayload.id = id;
              
-             const { data, error } = await supabase.from('students').insert([newStudent]).select().single();
-             if (error) throw error;
-             return { success: true, student: data as Student };
+             const { data, error } = await supabase.from('students').insert([dbPayload]).select().single();
+             
+             if (error) {
+                 console.error("Add student error:", error);
+                 throw error;
+             }
+             
+             // Map back for frontend use
+             const newStudent: Student = {
+                 ...data,
+                 teacherId: data.teacher_id,
+                 quizCount: data.quiz_count
+             };
+             
+             return { success: true, student: newStudent };
         } else if (params.action === 'edit') {
-             const { id, ...updates } = params;
-             delete updates.action;
-             const { error } = await supabase.from('students').update(updates).eq('id', id);
-             if (error) throw error;
+             const { id } = params;
+             const { error } = await supabase.from('students').update(dbPayload).eq('id', id);
+             if (error) {
+                 console.error("Edit student error:", error);
+                 throw error;
+             }
              return { success: true };
         } else if (params.action === 'delete') {
              const { error } = await supabase.from('students').delete().eq('id', params.id);
-             if (error) throw error;
+             if (error) {
+                 console.error("Delete student error:", error);
+                 throw error;
+             }
              return { success: true };
         }
-    } catch (e) {
-        console.error(e);
+    } catch (e: any) {
+        console.error("Manage student exception:", e);
     }
     return { success: false };
 };
@@ -404,11 +442,6 @@ export const saveScore = async (
     }
 
     // 2. Update Student Stats & Gamification
-    const updatePayload: any = { 
-        // Need to fetch current stars first or use RPC for atomic increment. 
-        // For simplicity here, we assume client passed updated state or we rely on gamificationData
-    };
-
     // If gamification data provided, update it
     if (gamificationData) {
         // Also add score to stars
@@ -487,7 +520,11 @@ export const fetchAppData = async (): Promise<AppData> => {
     ]);
 
     const cleanStudents = (studentsRes.data || []).map((s: any) => ({
-      ...s, id: String(s.id).trim(), stars: Number(s.stars) || 0
+      ...s, 
+      id: String(s.id).trim(), 
+      stars: Number(s.stars) || 0,
+      teacherId: s.teacher_id, // Map snake to camel
+      quizCount: s.quiz_count
     }));
 
     const cleanQuestions = (questionsRes.data || []).map((q: any) => ({
