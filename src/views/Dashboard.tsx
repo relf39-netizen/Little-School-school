@@ -183,28 +183,30 @@ const Dashboard: React.FC<DashboardProps> = ({
               const result = examResults.find(r => r.assignmentId === hw.id);
               const isOnet = hw.title?.startsWith('[O-NET]');
               return (
-                <div key={hw.id} className={`p-5 rounded-2xl shadow-sm border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:shadow-md transition-shadow ${isOnet ? 'bg-indigo-50 border-indigo-100' : 'bg-white border-gray-100'}`}>
-                   <div>
-                     <div className="flex items-center gap-2 mb-1">
-                        <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isOnet ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-50 text-blue-600'}`}>{hw.subject}</span>
-                        <span className="text-xs text-gray-400">{new Date(result?.timestamp || 0).toLocaleString('th-TH')}</span>
-                     </div>
-                     <div className="font-bold text-gray-800 text-lg">
-                        {hw.title || hw.subject}
-                     </div>
-                   </div>
-                   
-                   <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end bg-gray-50 p-3 rounded-xl sm:bg-transparent sm:p-0">
-                     <div className="text-right">
-                        <div className="text-xs text-gray-400 font-medium uppercase">คะแนนที่ได้</div>
-                        <div className="text-2xl font-black text-blue-600 leading-none">
-                            {result ? result.score : 0}
-                            <span className="text-sm text-gray-400 font-medium">/{result ? result.totalQuestions : 0}</span>
-                        </div>
-                     </div>
-                     <div className="bg-green-100 p-2 rounded-full text-green-600">
-                        <CheckCircle size={24} />
-                     </div>
+                <div key={hw.id} className={`p-5 rounded-2xl shadow-sm border flex flex-col justify-between items-start gap-4 hover:shadow-md transition-shadow ${isOnet ? 'bg-indigo-50 border-indigo-100' : 'bg-white border-gray-100'}`}>
+                   <div className="flex flex-col sm:flex-row justify-between w-full items-start sm:items-center">
+                       <div>
+                         <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isOnet ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-50 text-blue-600'}`}>{hw.subject}</span>
+                            <span className="text-xs text-gray-400">{new Date(result?.timestamp || 0).toLocaleString('th-TH')}</span>
+                         </div>
+                         <div className="font-bold text-gray-800 text-lg">
+                            {hw.title || hw.subject}
+                         </div>
+                       </div>
+                       
+                       <div className="flex items-center gap-4 mt-2 sm:mt-0">
+                         <div className="text-right">
+                            <div className="text-xs text-gray-400 font-medium uppercase">คะแนนที่ได้</div>
+                            <div className="text-2xl font-black text-blue-600 leading-none">
+                                {result ? result.score : 0}
+                                <span className="text-sm text-gray-400 font-medium">/{result ? result.totalQuestions : 0}</span>
+                            </div>
+                         </div>
+                         <div className="bg-green-100 p-2 rounded-full text-green-600">
+                            <CheckCircle size={24} />
+                         </div>
+                       </div>
                    </div>
                 </div>
               );
@@ -242,12 +244,13 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             </div>
 
+            {/* Pending O-NET */}
             <div className="space-y-4">
                 <h3 className="font-bold text-gray-800 flex items-center gap-2"><BookOpen size={20} className="text-indigo-600"/> ข้อสอบที่แนะนำ</h3>
                 
                 {pendingOnet.length === 0 ? (
-                    <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400">
-                        ยังไม่มีรายการติว O-NET ในตอนนี้
+                    <div className="text-center py-8 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400 text-sm">
+                        ไม่มีข้อสอบใหม่ในขณะนี้
                     </div>
                 ) : (
                     pendingOnet.map(hw => (
@@ -269,6 +272,27 @@ const Dashboard: React.FC<DashboardProps> = ({
                     ))
                 )}
             </div>
+
+            {/* Finished O-NET List */}
+            {finishedOnet.length > 0 && (
+                <div className="space-y-4 pt-4 border-t border-gray-200">
+                    <h3 className="font-bold text-gray-600 flex items-center gap-2"><CheckCircle size={20} className="text-green-500"/> ข้อสอบที่ทำเสร็จแล้ว</h3>
+                    {finishedOnet.map(hw => {
+                        const result = examResults.find(r => r.assignmentId === hw.id);
+                        return (
+                            <div key={hw.id} className="bg-gray-50 rounded-2xl p-4 border border-gray-200 flex justify-between items-center">
+                                <div>
+                                    <div className="font-bold text-gray-700">{hw.title}</div>
+                                    <div className="text-xs text-gray-500 mt-1">คะแนนล่าสุด: <span className="font-bold text-green-600">{result?.score || 0}/{result?.totalQuestions || 0}</span></div>
+                                </div>
+                                <span className="bg-green-100 text-green-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1">
+                                    <CheckCircle size={12}/> เรียบร้อย
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
       );
   }

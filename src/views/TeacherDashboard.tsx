@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Teacher, Student, Assignment, Question, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, ArrowRight, Users, GraduationCap, Trash2, Edit, UserCog, KeyRound, Sparkles, Wand2, Key, List, Trophy, User, Building, CreditCard, Search, Loader2, Clock, MonitorSmartphone, Database, UploadCloud, AlertTriangle, ToggleLeft, ToggleRight, BrainCircuit, Crown, HelpCircle } from 'lucide-react';
+import { UserPlus, BarChart2, FileText, LogOut, Save, RefreshCw, Gamepad2, Calendar, Eye, CheckCircle, X, PlusCircle, ChevronLeft, ChevronRight, Book, Calculator, FlaskConical, Languages, ArrowLeft, ArrowRight, Users, GraduationCap, Trash2, Edit, UserCog, KeyRound, Sparkles, Wand2, Key, List, Trophy, User, Building, CreditCard, Search, Loader2, Clock, MonitorSmartphone, Database, UploadCloud, AlertTriangle, ToggleLeft, ToggleRight, PenTool, BrainCircuit, Copy } from 'lucide-react';
 import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration, verifyStudentLogin, getQuestionsBySubject, getAllSchoolStats } from '../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../services/aiService';
 import { supabase } from '../services/firebaseConfig';
@@ -63,7 +63,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const [migrationTarget, setMigrationTarget] = useState<string>('auto');
   const [migrationLog, setMigrationLog] = useState<string[]>([]);
   const [isMigrating, setIsMigrating] = useState(false);
-  const migrationLogRef = useRef<HTMLDivElement>(null);
 
   // Profile Management State
   const [profileName, setProfileName] = useState(teacher.name || '');
@@ -227,13 +226,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     }
   }, [activeTab]);
 
-  // ✅ Auto-scroll logs
-  useEffect(() => {
-      if (migrationLogRef.current) {
-          migrationLogRef.current.scrollTop = migrationLogRef.current.scrollHeight;
-      }
-  }, [migrationLog]);
-
   // ✅ Lazy Loading for Questions when switching tabs/filtering
   useEffect(() => {
       const fetchQuestions = async () => {
@@ -319,8 +311,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   };
   
   const getStudentOverallStats = (studentId: string) => {
-    // 🟢 Exclude Game Mode from Student Average
-    const studentResults = stats.filter(r => String(r.studentId) === String(studentId) && r.subject !== 'GAME_MODE');
+    const studentResults = stats.filter(r => String(r.studentId) === String(studentId));
     const attempts = studentResults.length;
     let average = 0;
     if (attempts > 0) {
@@ -350,6 +341,92 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         if (isNaN(avg) || !isFinite(avg)) avg = 0;
         return { ...s, average: avg };
     });
+  };
+
+  const getGradeStats = (grade: string) => {
+      const gradeStudents = students.filter(s => s.grade === grade);
+      const studentIds = gradeStudents.map(s => s.id);
+      const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)));
+      
+      let totalScorePercent = 0; 
+      let count = 0;
+      
+      // ✅ 1. Identify ALL Subjects for this grade (from Available Subjects + Results)
+      const distinctSubjects = new Set<string>();
+      // Add from available subjects for this grade
+      availableSubjects.forEach(s => {
+          if (s.grade === 'ALL' || s.grade === grade) distinctSubjects.add(s.name);
+      });
+      // Add from actual results (legacy coverage)
+      gradeResults.forEach(r => distinctSubjects.add(r.subject));
+
+      const subjectMap: Record<string, { sumPct: number, count: number }> = {};
+      // Initialize map for all distinct subjects
+      distinctSubjects.forEach(sub => { subjectMap[sub] = { sumPct: 0, count: 0 }; });
+
+      gradeResults.forEach(r => {
+          const totalQ = Number(r.totalQuestions); 
+          const score = Number(r.score) || 0;
+          if (totalQ > 0) { 
+              const pct = (score / totalQ) * 100;
+              totalScorePercent += pct; 
+              count++; 
+              
+              if(subjectMap[r.subject]) {
+                  subjectMap[r.subject].sumPct += pct;
+                  subjectMap[r.subject].count++;
+              }
+          }
+      });
+      
+      const avg = count > 0 ? Math.round(totalScorePercent / count) : 0;
+      
+      const subjectStats = Object.keys(subjectMap).map(sub => ({
+          name: sub,
+          avg: subjectMap[sub].count > 0 ? Math.round(subjectMap[sub].sumPct / subjectMap[sub].count) : 0,
+          hasData: subjectMap[sub].count > 0
+      })).sort((a,b) => {
+          // Sort logic: Data first, then score
+          if (a.hasData && !b.hasData) return -1;
+          if (!a.hasData && b.hasData) return 1;
+          return b.avg - a.avg;
+      });
+
+      return { studentCount: gradeStudents.length, avgScore: avg, activityCount: count, subjectStats };
+  };
+
+  // ✅ New Logic: Calculate O-NET Specific Stats
+  const getOnetStats = () => {
+      const onetAssignIds = new Set(assignments.filter(a => a.title && a.title.startsWith('[O-NET]')).map(a => a.id));
+      const onetResults = stats.filter(r => onetAssignIds.has(r.assignmentId));
+      
+      const data: Record<string, Record<string, {sum: number, count: number}>> = {
+          'P6': {}, 'M3': {}
+      };
+      
+      // Initialize
+      ONET_SUBJECTS.forEach(s => {
+          data['P6'][s] = {sum:0, count:0};
+          data['M3'][s] = {sum:0, count:0};
+      });
+
+      onetResults.forEach(r => {
+          const student = students.find(s => String(s.id) === String(r.studentId));
+          // If student grade matches P6 or M3
+          if (student && (student.grade === 'P6' || student.grade === 'M3')) {
+              const g = student.grade;
+              const s = r.subject; // Should match ONET_SUBJECTS keys
+              
+              if (data[g] && data[g][s]) {
+                  const totalQ = Number(r.totalQuestions);
+                  if (totalQ > 0) {
+                      data[g][s].sum += (r.score / totalQ) * 100;
+                      data[g][s].count++;
+                  }
+              }
+          }
+      });
+      return data;
   };
 
   const handleImpersonate = async () => {
@@ -393,31 +470,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const handleToggleReg = async () => { const newState = !regEnabled; setRegEnabled(newState); await toggleRegistrationStatus(newState); };
   const handleApproveReg = async () => { if (!showApproveModal || !approveToSchool) return alert('เลือกโรงเรียนก่อนอนุมัติ'); setIsProcessing(true); const success = await approveRegistration(showApproveModal, approveToSchool); setIsProcessing(false); if (success) { alert('✅ อนุมัติเรียบร้อย รหัสผ่านคือ 123456'); setShowApproveModal(null); setApproveToSchool(''); loadData(); } else { alert('เกิดข้อผิดพลาด'); } };
   const handleRejectReg = async (id: string) => { if (!confirm('ปฏิเสธคำขอนี้?')) return; await rejectRegistration(id); loadData(); };
-  
-  // ✅ UPDATE: Fix handleAddSubject to pass ID and show error message
-  const handleAddSubject = async () => { 
-      if (!newSubjectName) return alert('กรุณากรอกชื่อวิชา'); 
-      setIsProcessing(true); 
-      const newSub: SubjectConfig = { 
-          id: Date.now().toString(), // Simple ID generation
-          name: newSubjectName, 
-          school: teacher.school, 
-          teacherId: normalizeId(teacher.id), 
-          grade: canManageAll ? 'ALL' : (myGrades[0] || 'ALL'), 
-          icon: newSubjectIcon, 
-          color: newSubjectColor 
-      }; 
-      const res = await addSubject(teacher.school, newSub); 
-      setIsProcessing(false); 
-      if (res.success) { 
-          alert('✅ เพิ่มวิชาเรียบร้อย'); 
-          setNewSubjectName(''); 
-          loadData(); 
-      } else { 
-          alert('เกิดข้อผิดพลาด: ' + (res.message || 'Unknown error')); 
-      } 
-  };
-
+  const handleAddSubject = async () => { if (!newSubjectName) return alert('กรุณากรอกชื่อวิชา'); setIsProcessing(true); const newSub: SubjectConfig = { id: Date.now().toString(), name: newSubjectName, school: teacher.school, teacherId: normalizeId(teacher.id), grade: canManageAll ? 'ALL' : (myGrades[0] || 'ALL'), icon: newSubjectIcon, color: newSubjectColor }; const success = await addSubject(teacher.school, newSub); setIsProcessing(false); if (success) { alert('✅ เพิ่มวิชาเรียบร้อย'); setNewSubjectName(''); loadData(); } else { alert('เกิดข้อผิดพลาด'); } };
   const handleDeleteSubject = async (subId: string) => { if (!confirm('ยืนยันการลบวิชานี้?')) return; setIsProcessing(true); await deleteSubject(teacher.school, subId); setIsProcessing(false); loadData(); };
   const toggleTeacherGrade = (grade: string) => { setNewTeacherGrades(prev => { if (grade === 'ALL') return ['ALL']; let newGrades = prev.filter(g => g !== 'ALL'); if (newGrades.includes(grade)) { newGrades = newGrades.filter(g => g !== grade); } else { newGrades.push(grade); } if (newGrades.length === 0) return ['ALL']; return newGrades; }); };
   const handleSaveTeacher = async () => { if (!newTeacherName || !newTeacherUser) return alert('กรุณากรอกชื่อและ Username'); if (!editingTeacherId && !newTeacherPass) return alert('กรุณากำหนดรหัสผ่านสำหรับบัญชีใหม่'); setIsProcessing(true); const gradeLevelString = newTeacherGrades.join(','); const teacherData: any = { action: editingTeacherId ? 'edit' : 'add', id: editingTeacherId || undefined, name: newTeacherName, username: newTeacherUser, school: newTeacherSchool || teacher.school, role: newTeacherRole, gradeLevel: gradeLevelString }; if (newTeacherPass) teacherData.password = newTeacherPass; const res = await manageTeacher(teacherData); setIsProcessing(false); if (res.success) { alert(editingTeacherId ? '✅ แก้ไขข้อมูลบุคลากรเรียบร้อย' : '✅ เพิ่มบัญชีบุคลากรเรียบร้อย'); setNewTeacherName(''); setNewTeacherUser(''); setNewTeacherPass(''); if(!selectedSchoolForView) setNewTeacherSchool(''); setNewTeacherGrades(['ALL']); setNewTeacherRole('TEACHER'); setEditingTeacherId(null); loadData(); } else { alert('เกิดข้อผิดพลาด: ' + (res.message || 'Unknown error')); } };
@@ -435,6 +488,35 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const handleFinalizeAssignment = async () => { if (newlyGeneratedQuestions.length > 0) { setIsProcessing(true); const tid = normalizeId(teacher.id); for (const q of newlyGeneratedQuestions) { await addQuestion({ subject: assignSubject, grade: assignGrade, text: q.text, image: q.image || '', c1: q.c1, c2: q.c2, c3: q.c3, c4: q.c4, correct: q.correct, explanation: q.explanation, school: teacher.school, teacherId: tid }); } } setIsProcessing(true); let finalTitle = assignTitle; if (activeTab === 'onet') { if (!finalTitle) finalTitle = `[O-NET] ฝึกฝน${assignSubject} เรื่อง ${assignAiTopic || 'ทั่วไป'}`; else if (!finalTitle.startsWith('[O-NET]')) finalTitle = `[O-NET] ${finalTitle}`; } else { if (!finalTitle) finalTitle = `การบ้าน ${assignSubject}`; } const success = await addAssignment(teacher.school, assignSubject, assignGrade, assignCount, assignDeadline, teacher.name, finalTitle); setIsProcessing(false); if (success) { alert('✅ สั่งการบ้านเรียบร้อยแล้ว'); setAssignStep(1); setAssignDeadline(''); setAssignTitle(''); setNewlyGeneratedQuestions([]); setAssignAiTopic(''); if (activeTab === 'onet') await loadData(); else { setActiveTab('assignments'); await loadData(); } } else { alert('เกิดข้อผิดพลาดในการสร้างการบ้าน'); } };
   const handleDeleteAssignment = async (id: string) => { if (!confirm('ยืนยันลบการบ้านนี้?')) return; setIsProcessing(true); const success = await deleteAssignment(id); setIsProcessing(false); if (success) { setAssignments(prev => prev.filter(a => a.id !== id)); loadData(); } };
   const handleViewAssignment = (a: Assignment) => { setSelectedAssignment(a); setAssignmentModalTab('status'); };
+
+  // ✅ New Redo Assignment Handler
+  const handleRedoAssignment = async (original: Assignment) => {
+        if(!confirm(`ต้องการมอบหมายงาน "${original.title || original.subject}" ให้นักเรียนทำอีกครั้งใช่ไหม?`)) return;
+        
+        setIsProcessing(true);
+        // Default deadline: 3 days from now
+        const date = new Date();
+        date.setDate(date.getDate() + 3);
+        const newDeadline = date.toISOString().split('T')[0];
+        
+        const success = await addAssignment(
+            original.school,
+            original.subject,
+            original.grade || 'ALL',
+            original.questionCount,
+            newDeadline,
+            original.createdBy,
+            original.title ? `${original.title} (รอบเพิ่มเติม)` : `${original.subject} (รอบเพิ่มเติม)`
+        );
+        
+        if(success) {
+            alert('✅ มอบหมายงานซ้ำเรียบร้อยแล้ว');
+            await loadData();
+        } else {
+            alert('เกิดข้อผิดพลาดในการมอบหมายซ้ำ');
+        }
+        setIsProcessing(false);
+  };
 
   const handleSaveQuestion = async () => { if (!qText || !qChoices.c1 || !qChoices.c2 || !qSubject) return alert('กรุณากรอกข้อมูลให้ครบถ้วน'); const tid = normalizeId(teacher.id); setIsProcessing(true); const questionPayload = { id: editingQuestionId, subject: qSubject, grade: qGrade, text: qText, image: qImage, c1: qChoices.c1, c2: qChoices.c2, c3: qChoices.c3, c4: qChoices.c4, correct: qCorrect, explanation: qExplain, school: teacher.school, teacherId: tid }; let success = editingQuestionId ? await editQuestion(questionPayload) : await addQuestion(questionPayload); setIsProcessing(false); if (success) { alert('✅ บันทึกสำเร็จ'); setQText(''); setQChoices({c1:'', c2:'', c3:'', c4:''}); setEditingQuestionId(null); 
      if (activeTab === 'questions' && qBankSubject === qSubject) {
@@ -464,231 +546,96 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
      }
   };
 
-  // ✅ ENHANCED MIGRATION HANDLER with Robust UUID & Validations
+  // ✅ Migration Handler
   const handleMigration = async () => {
       if (!migrationFile) return alert("กรุณาเลือกไฟล์ JSON");
       setIsMigrating(true);
       const logs: string[] = [];
       const log = (msg: string) => { logs.push(msg); setMigrationLog([...logs]); };
       
-      const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-      
-      // Safer UUID generation
-      const getUUID = (str: string) => {
-          if (isUUID(str)) return str;
-          if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-              return crypto.randomUUID();
-          }
-          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-              var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-              return v.toString(16);
-          });
-      };
-
-      const cleanSchool = (s: string) => s ? s.trim() : 'CENTER';
-      
-      const idMap: Record<string, string> = {}; // Old ID -> New UUID
-      const validStudentIds = new Set<string>(); // Keep track of valid students
-
       try {
           const text = await migrationFile.text();
           const json = JSON.parse(text);
+          
           log(`Loaded file: ${migrationFile.name}`);
           
+          // Determine structure
+          let dataToImport: any[] = [];
+          let targetTable = migrationTarget;
+
+          // Helper to normalize Firebase object to array
+          const toArray = (obj: any) => {
+             if (Array.isArray(obj)) return obj.filter(x => x);
+             return Object.keys(obj).map(key => ({ id: key, ...obj[key] }));
+          };
+
           if (migrationTarget === 'auto') {
-              // 1. EXTRACT SCHOOLS
-              const schoolsToInsert = new Set<string>();
-              const users = json.users || json.students || {};
-              Object.values(users).forEach((u: any) => { if(u && u.school) schoolsToInsert.add(cleanSchool(u.school)); });
-              const teachers = json.teachers || {};
-              Object.values(teachers).forEach((t: any) => { if(t && t.school) schoolsToInsert.add(cleanSchool(t.school)); });
-
-              log(`Found ${schoolsToInsert.size} unique schools.`);
-              for (const schoolName of schoolsToInsert) {
-                  const { error } = await supabase.from('schools').upsert({ name: schoolName, status: 'active' }, { onConflict: 'name' });
-                  if(error) log(`Warning: Could not insert school ${schoolName}: ${error.message}`);
+              // Try to detect root keys
+              if (json.students) {
+                  log("Detected 'students' node. Importing students...");
+                  const rows = toArray(json.students);
+                  const { error } = await supabase.from('students').upsert(rows);
+                  if(error) log(`Error importing students: ${error.message}`);
+                  else log(`✅ Imported ${rows.length} students.`);
               }
-              log("✅ Schools synced.");
-
-              // 2. IMPORT TEACHERS
               if (json.teachers) {
-                  log("Importing teachers...");
-                  const teacherRows = Object.values(json.teachers).map((t: any) => ({
-                      username: t.username,
-                      password: t.password,
-                      name: t.name,
-                      school: cleanSchool(t.school),
-                      role: t.role || 'TEACHER',
-                      grade_level: t.gradeLevel || t.grade_level || 'ALL'
-                  })).filter((t: any) => t.username);
-
-                  const { error } = await supabase.from('teachers').upsert(teacherRows, { onConflict: 'username' });
+                  log("Detected 'teachers' node. Importing teachers...");
+                  const rows = toArray(json.teachers);
+                  const { error } = await supabase.from('teachers').upsert(rows);
                   if(error) log(`Error importing teachers: ${error.message}`);
-                  else log(`✅ Imported ${teacherRows.length} teachers.`);
+                  else log(`✅ Imported ${rows.length} teachers.`);
               }
-
-              // 3. IMPORT STUDENTS
-              const studentsNode = json.users || json.students;
-              if (studentsNode) {
-                  log("Importing students...");
-                  const studentRows = Object.keys(studentsNode).map((key) => {
-                      const s = studentsNode[key];
-                      const sid = s.id || (String(key).match(/^\d+$/) ? key : undefined);
-                      if (!sid) return null;
-                      
-                      // Normalize ID
-                      const finalId = String(sid).trim();
-                      validStudentIds.add(finalId); // Add to valid set
-
-                      return {
-                          id: finalId,
-                          name: s.name,
-                          school: cleanSchool(s.school),
-                          avatar: s.avatar || '👦',
-                          stars: s.stars || 0,
-                          grade: s.grade || 'P6',
-                          quiz_count: s.quizCount || 0,
-                          level: s.level || 1,
-                          tokens: s.tokens || 0
-                      };
-                  }).filter(s => s !== null);
-
-                  const BATCH_SIZE = 200;
-                  for (let i = 0; i < studentRows.length; i += BATCH_SIZE) {
-                      const batch = studentRows.slice(i, i + BATCH_SIZE);
-                      const { error } = await supabase.from('students').upsert(batch);
-                      if(error) log(`Error batch ${i}: ${error.message}`);
-                  }
-                  log(`✅ Imported ${studentRows.length} students.`);
-              }
-
-              // 4. IMPORT QUESTIONS
               if (json.questions) {
-                  log("Importing questions...");
-                  const qRows = Object.values(json.questions).map((q: any) => {
-                      const newId = getUUID(q.id);
-                      idMap[q.id] = newId; 
+                  log("Detected 'questions' node. Importing questions...");
+                  // Need to fix choices structure if from old system
+                  let rows = toArray(json.questions);
+                  // Normalize fields
+                  rows = rows.map((q: any) => ({
+                      id: q.id,
+                      subject: q.subject,
+                      text: q.text,
+                      grade: q.grade || 'P6',
+                      // Fix choices: convert array of objects to simple jsonb if needed, or keep as is if compatible
+                      choices: JSON.stringify(q.choices), 
+                      correct_choice_id: q.correctChoiceId,
+                      explanation: q.explanation,
+                      school: q.school,
+                      teacher_id: q.teacherId
+                  }));
 
-                      return {
-                          id: newId,
-                          subject: q.subject,
-                          text: q.text,
-                          image: q.image,
-                          choices: typeof q.choices === 'string' ? q.choices : JSON.stringify(q.choices),
-                          correct_choice_id: q.correctChoiceId || q.correct_choice_id || q.correct,
-                          explanation: q.explanation,
-                          grade: q.grade || 'P6',
-                          school: cleanSchool(q.school), 
-                          teacher_id: q.teacherId 
-                      };
-                  });
-                  
-                  const { error } = await supabase.from('questions').upsert(qRows, { ignoreDuplicates: true });
+                  const { error } = await supabase.from('questions').upsert(rows);
                   if(error) log(`Error importing questions: ${error.message}`);
-                  else log(`✅ Imported ${qRows.length} questions.`);
+                  else log(`✅ Imported ${rows.length} questions.`);
               }
-
-              // 5. IMPORT ASSIGNMENTS
-              if (json.assignments) {
-                  log("Importing assignments...");
-                  const aRows = Object.values(json.assignments).map((a: any) => {
-                      const newId = getUUID(a.id);
-                      idMap[a.id] = newId;
-
-                      return {
-                          id: newId,
-                          school: cleanSchool(a.school || a.schoolName),
-                          subject: a.subject,
-                          grade: a.grade || 'ALL',
-                          question_count: a.questionCount || 10,
-                          deadline: a.deadline,
-                          created_by: a.createdBy || 'Admin',
-                          title: a.title
-                      };
-                  });
-                  
-                  const { error } = await supabase.from('assignments').upsert(aRows, { ignoreDuplicates: true });
-                  if(error) log(`Error importing assignments: ${error.message}`);
-                  else log(`✅ Imported ${aRows.length} assignments.`);
-              }
-
-              // 6. IMPORT EXAM RESULTS (Fix Logic)
-              const resultsNode = json.results || json.examResults || json.exam_results;
-              if (resultsNode) {
-                  log("Importing exam results...");
-                  const rRows = Object.values(resultsNode).map((r: any) => {
-                      const oldAssignId = r.assignmentId !== '-' ? r.assignmentId : null;
-                      // Try to map ID, if fail, keep as null (don't skip result!)
-                      let newAssignId = null;
-                      if (oldAssignId) {
-                          if (idMap[oldAssignId]) newAssignId = idMap[oldAssignId];
-                          else if (isUUID(oldAssignId)) newAssignId = oldAssignId;
-                      }
-                      
-                      // Validate Student ID (Must exist in students table)
-                      const stId = String(r.studentId || r.student_id).trim();
-                      if (!validStudentIds.has(stId)) {
-                          // Skip if student doesn't exist to prevent FK error
-                          return null;
-                      }
-
-                      return {
-                          id: getUUID(r.id), 
-                          student_id: stId,
-                          student_name: r.studentName,
-                          school: cleanSchool(r.school),
-                          score: r.score,
-                          total_questions: r.totalQuestions || r.total,
-                          subject: r.subject,
-                          assignment_id: newAssignId, // Can be null
-                          timestamp: r.timestamp || Date.now()
-                      };
-                  }).filter(r => r !== null);
-                  
-                  const BATCH_SIZE = 100;
-                  let successCount = 0;
-                  for (let i = 0; i < rRows.length; i += BATCH_SIZE) {
-                      const batch = rRows.slice(i, i + BATCH_SIZE);
-                      const { error } = await supabase.from('exam_results').upsert(batch, { ignoreDuplicates: true });
-                      if(error) log(`Error results batch ${i}: ${error.message}`);
-                      else successCount += batch.length;
-                  }
-                  log(`✅ Imported ${successCount} exam results.`);
-              }
-
-              // 7. INFER & IMPORT SUBJECTS
-              log("Inferring subjects from data...");
-              const subjectSet = new Set<string>(); // Format: "SchoolName|SubjectName"
-              const addSub = (school: string, subject: string) => {
-                  if(school && subject) subjectSet.add(`${cleanSchool(school)}|${subject}`);
-              }
-              if (json.questions) Object.values(json.questions).forEach((q: any) => addSub(q.school, q.subject));
-              if (json.assignments) Object.values(json.assignments).forEach((a: any) => addSub(a.school || a.schoolName, a.subject));
-
-              log(`Found ${subjectSet.size} unique school-subject pairs.`);
-              const subjectRows = Array.from(subjectSet).map(item => {
-                  const [school, name] = item.split('|');
-                  const safeId = `${school}_${name}`.replace(/[^a-zA-Z0-9_]/g, '_');
-                  return { id: safeId, name: name, school: school, teacher_id: normalizeId(teacher.id), grade: 'ALL', icon: 'Book', color: 'bg-white border-gray-200' };
-              });
-
-              // Deduplicate
-              const uniqueSubjectMap = new Map();
-              subjectRows.forEach(row => { if (!uniqueSubjectMap.has(row.id)) uniqueSubjectMap.set(row.id, row); });
-              const finalSubjectRows = Array.from(uniqueSubjectMap.values());
-
-              if (finalSubjectRows.length > 0) {
-                  const { error } = await supabase.from('subjects').upsert(finalSubjectRows, { onConflict: 'id' });
-                  if (error) log(`Error importing subjects: ${error.message}`);
-                  else log(`✅ Imported ${finalSubjectRows.length} subjects.`);
-              }
-
           } else {
-               log("Manual mode not supported. Use Auto.");
+               // Specific table import
+               log(`Importing into '${migrationTarget}'...`);
+               let rows = toArray(json); // Assume the file IS the data for that table
+               
+               // Adjust fields based on target
+               if (migrationTarget === 'questions') {
+                    rows = rows.map((q: any) => ({
+                      id: q.id,
+                      subject: q.subject,
+                      text: q.text,
+                      grade: q.grade || 'P6',
+                      choices: typeof q.choices === 'object' ? JSON.stringify(q.choices) : q.choices, 
+                      correct_choice_id: q.correctChoiceId || q.correct_choice_id,
+                      explanation: q.explanation,
+                      school: q.school,
+                      teacher_id: q.teacherId || q.teacher_id
+                   }));
+               }
+               
+               const { error } = await supabase.from(migrationTarget).upsert(rows);
+               if(error) throw error;
+               log(`✅ Imported ${rows.length} rows into ${migrationTarget}.`);
           }
-          log("Migration process finished.");
+          
+          log("Migration Completed.");
+
       } catch (e: any) {
-          log(`❌ Fatal Error: ${e.message}`);
+          log(`❌ Error: ${e.message}`);
           console.error(e);
       } finally {
           setIsMigrating(false);
@@ -711,6 +658,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
        const loadAssignQs = async () => {
            setLoadingQuestions(true);
            const qs = await getQuestionsBySubject(selectedAssignment.subject);
+           // Filter just for this assignment visually if needed, but getQuestionsBySubject returns all for subject.
+           // We will slice in render.
            setQuestions(qs);
            setLoadingQuestions(false);
        };
@@ -742,11 +691,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     selectedGradeFilter ? s.grade === selectedGradeFilter : true
   );
 
-  // ... (Render Functions for Menu Cards etc. omitted for brevity, assuming standard render) ...
-
   return (
     <div className="max-w-6xl mx-auto pb-20 relative">
-       {/* ... Modal Rendering ... */}
        {isProcessing && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center">
              <div className="bg-white p-6 rounded-xl animate-bounce shadow-xl font-bold text-gray-700">{processingMessage || 'กำลังประมวลผล...'}</div>
@@ -758,141 +704,121 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-fade-in">
                     {/* Header */}
-                    <div className="p-4 border-b bg-gray-50">
-                        <div className="flex justify-between items-center mb-4">
-                            <div>
-                                <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
-                                    <FileText size={20} className="text-blue-600"/> 
-                                    {selectedAssignment.title || selectedAssignment.subject}
-                                </h3>
-                                <p className="text-xs text-gray-500">
-                                    {GRADE_LABELS[selectedAssignment.grade || 'ALL'] || selectedAssignment.grade} | 
-                                    ส่งภายใน: {formatDate(selectedAssignment.deadline)}
-                                </p>
-                            </div>
-                            <button onClick={() => setSelectedAssignment(null)} className="text-gray-400 hover:text-red-500 p-2"><X size={24}/></button>
+                    <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                        <div>
+                            <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                                <FileText size={20} className="text-blue-600"/> 
+                                {selectedAssignment.title || selectedAssignment.subject}
+                            </h3>
+                            <p className="text-xs text-gray-500">
+                                {GRADE_LABELS[selectedAssignment.grade || 'ALL'] || selectedAssignment.grade} | 
+                                ส่งภายใน: {formatDate(selectedAssignment.deadline)}
+                            </p>
                         </div>
-                        
-                        {/* 🟢 TABS */}
-                        <div className="flex gap-2 border-b border-gray-200">
-                            <button 
-                                onClick={() => setAssignmentModalTab('status')}
-                                className={`px-4 py-2 text-sm font-bold border-b-2 transition ${assignmentModalTab === 'status' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                <Users size={16} className="inline mr-2"/> สถานะการส่ง
-                            </button>
-                            <button 
-                                onClick={() => setAssignmentModalTab('questions')}
-                                className={`px-4 py-2 text-sm font-bold border-b-2 transition ${assignmentModalTab === 'questions' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                <FileText size={16} className="inline mr-2"/> ข้อสอบ ({selectedAssignment.questionCount} ข้อ)
-                            </button>
-                        </div>
+                        <button onClick={() => setSelectedAssignment(null)} className="text-gray-400 hover:text-red-500 p-2"><X size={24}/></button>
+                    </div>
+                    
+                    {/* Tabs */}
+                    <div className="flex border-b bg-white">
+                        <button 
+                            onClick={() => setAssignmentModalTab('status')}
+                            className={`flex-1 py-3 text-sm font-bold transition ${assignmentModalTab === 'status' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-gray-500 hover:bg-gray-50'}`}
+                        >
+                            สถานะการส่งงาน
+                        </button>
+                        <button 
+                            onClick={() => setAssignmentModalTab('questions')}
+                            className={`flex-1 py-3 text-sm font-bold transition ${assignmentModalTab === 'questions' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-gray-500 hover:bg-gray-50'}`}
+                        >
+                            ข้อสอบที่ใช้
+                        </button>
                     </div>
                     
                     {/* Content */}
-                    <div className="flex-1 overflow-y-auto bg-gray-50">
-                        {assignmentModalTab === 'status' ? (
-                            <table className="w-full text-sm text-left bg-white">
-                                <thead className="bg-blue-50 text-blue-900 font-bold sticky top-0 shadow-sm">
-                                    <tr>
-                                        <th className="p-4">รายชื่อนักเรียน</th>
-                                        <th className="p-4 text-center">สถานะ</th>
-                                        <th className="p-4 text-right">คะแนน</th>
-                                        <th className="p-4 text-right">ส่งเมื่อ</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {/* Filter students based on assignment grade */}
-                                    {students
-                                        .filter(s => !selectedAssignment.grade || selectedAssignment.grade === 'ALL' || s.grade === selectedAssignment.grade)
-                                        .map(s => {
-                                            // ✅ Fix: Get the latest score for this assignment (handle multiple attempts)
-                                            const results = stats.filter(r => String(r.studentId) === String(s.id) && r.assignmentId === selectedAssignment.id);
-                                            const result = results.length > 0 ? results[results.length - 1] : undefined;
-                                            
-                                            return (
-                                                <tr key={s.id} className="hover:bg-gray-50">
-                                                    <td className="p-4 flex items-center gap-3">
-                                                        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-lg">{s.avatar}</div>
-                                                        <div>
-                                                            <div className="font-bold text-gray-800">{s.name}</div>
-                                                            <div className="text-xs text-gray-400">ID: {s.id}</div>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        {result ? (
-                                                            <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
-                                                                <CheckCircle size={12}/> ส่งแล้ว
-                                                            </span>
-                                                        ) : (
-                                                            <span className="bg-gray-100 text-gray-400 px-2 py-1 rounded-full text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
-                                                                <Clock size={12}/> รอส่ง
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-4 text-right">
-                                                        {result ? <span className="font-bold text-blue-600 text-lg">{result.score}/{result.totalQuestions}</span> : '-'}
-                                                    </td>
-                                                    <td className="p-4 text-right text-gray-500 text-xs">
-                                                        {result ? new Date(result.timestamp).toLocaleString('th-TH') : '-'}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                        {students.filter(s => !selectedAssignment.grade || selectedAssignment.grade === 'ALL' || s.grade === selectedAssignment.grade).length === 0 && (
-                                            <tr><td colSpan={4} className="p-8 text-center text-gray-400">ไม่พบนักเรียนในกลุ่มเป้าหมาย</td></tr>
-                                        )}
-                                </tbody>
-                            </table>
-                        ) : (
-                            <div className="p-6">
-                                {loadingQuestions ? (
-                                    <div className="flex flex-col items-center justify-center p-10 text-gray-400">
-                                        <Loader2 className="animate-spin mb-2" size={32}/>
-                                        <p>กำลังโหลดข้อสอบ...</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4 max-w-3xl mx-auto">
-                                        {questions
-                                            .filter(q => !selectedAssignment.grade || selectedAssignment.grade === 'ALL' || q.grade === selectedAssignment.grade || q.grade === 'ALL')
-                                            .slice(0, selectedAssignment.questionCount)
-                                            .map((q, idx) => (
-                                            <div key={q.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative group hover:border-blue-300 transition">
-                                                <div className="flex gap-3">
-                                                    <span className="bg-blue-100 text-blue-700 font-bold w-8 h-8 flex items-center justify-center rounded-full flex-shrink-0 text-sm">{idx+1}</span>
-                                                    <div className="flex-1">
-                                                        <div className="font-bold text-gray-800 text-lg mb-3">{q.text}</div>
-                                                        {q.image && <img src={q.image} className="h-32 object-contain mb-3 rounded border bg-gray-50"/>}
-                                                        
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
-                                                            {q.choices.map((c, i) => {
-                                                                const isCorrect = String(q.correctChoiceId) === String(i+1) || String(q.correctChoiceId) === c.id;
-                                                                return (
-                                                                    <div key={i} className={`p-2.5 rounded-lg border text-sm flex items-center gap-2 ${isCorrect ? 'bg-green-50 border-green-200 text-green-800' : 'bg-white border-gray-100 text-gray-600'}`}>
-                                                                        {isCorrect && <CheckCircle size={16} className="text-green-600"/>}
-                                                                        {!isCorrect && <div className="w-4 h-4 rounded-full border border-gray-300"></div>}
-                                                                        {c.text}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                        
-                                                        <div className="bg-gray-50 p-3 rounded-lg text-xs text-gray-600 flex gap-2 items-start">
-                                                            <HelpCircle size={14} className="mt-0.5 text-blue-500 flex-shrink-0"/>
-                                                            <div>
-                                                                <span className="font-bold text-gray-700">เฉลย/คำอธิบาย:</span> {q.explanation}
-                                                            </div>
-                                                        </div>
+                    <div className="flex-1 overflow-y-auto p-0 bg-white">
+                    {assignmentModalTab === 'status' ? (
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-blue-50 text-blue-900 font-bold sticky top-0">
+                                <tr>
+                                    <th className="p-4">รายชื่อนักเรียน</th>
+                                    <th className="p-4 text-center">สถานะ</th>
+                                    <th className="p-4 text-right">คะแนน</th>
+                                    <th className="p-4 text-right">ส่งเมื่อ</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {/* Filter students based on assignment grade */}
+                                {students
+                                    .filter(s => !selectedAssignment.grade || selectedAssignment.grade === 'ALL' || s.grade === selectedAssignment.grade)
+                                    .map(s => {
+                                        const results = stats.filter(r => String(r.studentId) === String(s.id) && r.assignmentId === selectedAssignment.id);
+                                        const result = results.length > 0 ? results[results.length - 1] : undefined;
+                                        
+                                        return (
+                                            <tr key={s.id} className="hover:bg-gray-50">
+                                                <td className="p-4 flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-lg">{s.avatar}</div>
+                                                    <div>
+                                                        <div className="font-bold text-gray-800">{s.name}</div>
+                                                        <div className="text-xs text-gray-400">ID: {s.id}</div>
                                                     </div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                        {questions.length === 0 && <div className="text-center py-10 text-gray-400">ไม่พบข้อสอบในเงื่อนไขนี้</div>}
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    {result ? (
+                                                        <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
+                                                            <CheckCircle size={12}/> ส่งแล้ว
+                                                        </span>
+                                                    ) : (
+                                                        <span className="bg-gray-100 text-gray-400 px-2 py-1 rounded-full text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
+                                                            <Clock size={12}/> รอส่ง
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="p-4 text-right">
+                                                    {result ? <span className="font-bold text-blue-600 text-lg">{result.score}/{result.totalQuestions}</span> : '-'}
+                                                </td>
+                                                <td className="p-4 text-right text-gray-500 text-xs">
+                                                    {result ? new Date(result.timestamp).toLocaleString('th-TH') : '-'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {students.filter(s => !selectedAssignment.grade || selectedAssignment.grade === 'ALL' || s.grade === selectedAssignment.grade).length === 0 && (
+                                        <tr><td colSpan={4} className="p-8 text-center text-gray-400">ไม่พบนักเรียนในกลุ่มเป้าหมาย</td></tr>
+                                    )}
+                            </tbody>
+                        </table>
+                    ) : (
+                        <div className="p-6">
+                            {loadingQuestions ? (
+                                <div className="text-center py-10 text-gray-400"><Loader2 className="animate-spin inline mr-2"/>กำลังโหลดข้อสอบ...</div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="bg-blue-50 p-3 rounded-lg text-blue-800 text-sm border border-blue-100 mb-4">
+                                        <b>หมายเหตุ:</b> รายการข้อสอบที่แสดงอาจมีการเปลี่ยนแปลงหากมีการแก้ไขในคลังข้อสอบ
                                     </div>
-                                )}
-                            </div>
-                        )}
+                                    {questions.filter(q => q.subject === selectedAssignment.subject && (!selectedAssignment.grade || selectedAssignment.grade === 'ALL' || q.grade === selectedAssignment.grade || q.grade === 'ALL')).slice(0, selectedAssignment.questionCount).map((q, i) => (
+                                        <div key={i} className="p-4 border rounded-xl bg-gray-50 relative group hover:bg-white transition shadow-sm">
+                                            <div className="font-bold text-gray-800 mb-2">ข้อที่ {i+1}</div>
+                                            <div className="text-gray-700 mb-2">{q.text}</div>
+                                            {q.image && <img src={q.image} className="h-32 object-contain rounded border bg-white mb-2" />}
+                                            <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                                                {q.choices.map((c, idx) => (
+                                                    <div key={idx} className={`${(idx+1).toString() === q.correctChoiceId ? 'text-green-600 font-bold' : ''}`}>
+                                                        {idx+1}. {c.text}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="text-xs text-blue-500 mt-2 pt-2 border-t border-gray-200">
+                                                <b>เฉลย:</b> {q.explanation}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {questions.length === 0 && <div className="text-center text-gray-400">ไม่พบข้อมูลข้อสอบ</div>}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     </div>
                 </div>
             </div>
@@ -1043,7 +969,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
           </div>
       )}
 
-      {/* Main Header */}
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6 rounded-b-3xl md:rounded-3xl shadow-lg mb-8 flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2"><GraduationCap size={28} /> ห้องพักครู</h2>
@@ -1160,7 +1085,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
         <div className="bg-white rounded-3xl shadow-sm p-4 md:p-6 min-h-[400px] relative animate-fade-in">
             <button onClick={() => { setActiveTab('menu'); setEditingStudentId(null); setCreatedStudent(null); setSelectedStudentForStats(null); setViewLevel('GRADES'); setSelectedGradeFilter(null); }} className="mb-6 flex items-center gap-2 text-gray-500 hover:text-purple-600 font-bold transition-colors"><div className="bg-gray-100 p-2 rounded-full"><ArrowLeft size={20} /></div> กลับเมนูหลัก</button>
             
-            {/* STUDENTS TAB - Navigation for Multi-Grade Views */}
+            {/* STUDENTS TAB - Navigation for Multi-Grade Teachers */}
             {activeTab === 'students' && viewLevel === 'GRADES' && (
                 <div className="animate-fade-in">
                     <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2"><UserPlus className="text-purple-600"/> เลือกชั้นเรียน (จัดการนักเรียน)</h3>
@@ -1185,9 +1110,10 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 </div>
             )}
             
-            {/* ... Migration Tab ... */}
+            {/* ... Other Tabs (Students List, Subjects, Stats, etc.) - Preserving structure ... */}
+
+            {/* MIGRATION TAB */}
             {activeTab === 'migration' && isAdmin && (
-                /* ... (Unchanged content from previous implementation) ... */
                 <div className="max-w-4xl mx-auto">
                     <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 mb-8">
                         <h3 className="text-xl font-bold text-emerald-900 mb-4 flex items-center gap-2"><Database/> นำเข้าข้อมูลเก่า (Migration)</h3>
@@ -1201,6 +1127,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                     <option value="students">👨‍🎓 นักเรียน (Students)</option>
                                     <option value="teachers">👩‍🏫 ครู/บุคลากร (Teachers)</option>
                                     <option value="questions">📝 ข้อสอบ (Questions)</option>
+                                    <option value="schools">🏫 โรงเรียน (Schools)</option>
+                                    <option value="subjects">📚 วิชา (Subjects)</option>
                                 </select>
 
                                 <label className="block text-sm font-bold text-gray-700 mb-2">2. เลือกไฟล์ JSON</label>
@@ -1223,7 +1151,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             <div className="flex flex-col justify-end">
                                 <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-xs text-yellow-800 mb-4">
                                     <strong className="flex items-center gap-1 mb-1"><AlertTriangle size={14}/> คำเตือน:</strong>
-                                    ระบบจะค้นหาชื่อโรงเรียนจากข้อมูลและสร้างให้อัตโนมัติ ข้อมูลที่มี ID ซ้ำกันจะถูกเขียนทับ
+                                    ข้อมูลที่มี ID ซ้ำกันจะถูกเขียนทับ (Upsert) กรุณาตรวจสอบความถูกต้องก่อนนำเข้า
                                 </div>
                                 <button 
                                     onClick={handleMigration}
@@ -1238,7 +1166,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                     </div>
 
                     {/* Logs */}
-                    <div ref={migrationLogRef} className="bg-slate-900 rounded-xl p-4 text-xs font-mono text-slate-300 h-64 overflow-y-auto border border-slate-700 shadow-inner">
+                    <div className="bg-slate-900 rounded-xl p-4 text-xs font-mono text-slate-300 h-64 overflow-y-auto border border-slate-700 shadow-inner">
                         <div className="text-slate-500 border-b border-slate-700 pb-2 mb-2">Migration Logs...</div>
                         {migrationLog.length === 0 ? (
                             <div className="opacity-30 italic">Ready to start...</div>
@@ -1387,7 +1315,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
             {/* STATS TAB - View Navigation */}
             {activeTab === 'stats' && viewLevel === 'GRADES' && (
-                /* ... (Same Stats Grades View) ... */
                 <div className="animate-fade-in">
                     <div className="flex justify-between items-center mb-6">
                         <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><BarChart2 className="text-green-600"/> เลือกชั้นเรียน (ดูผลการเรียน)</h3>
@@ -1395,29 +1322,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                         {(canManageAll ? GRADES : myGrades).map(g => {
-                            // ✅ Exclude Game Mode stats here
-                            const getGradeStats = (grade: string) => {
-                                const gradeStudents = students.filter(s => s.grade === grade);
-                                const studentIds = gradeStudents.map(s => s.id);
-                                const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)) && r.subject !== 'GAME_MODE');
-                                
-                                let totalScorePercent = 0; 
-                                let count = 0;
-                                
-                                gradeResults.forEach(r => {
-                                    const totalQ = Number(r.totalQuestions); 
-                                    const score = Number(r.score) || 0;
-                                    if (totalQ > 0) { 
-                                        const pct = (score / totalQ) * 100;
-                                        totalScorePercent += pct; 
-                                        count++; 
-                                    }
-                                });
-                                
-                                const avg = count > 0 ? Math.round(totalScorePercent / count) : 0;
-                                return { studentCount: gradeStudents.length, avgScore: avg, activityCount: count };
-                            };
-
                             const gStats = getGradeStats(g);
                             if (gStats.studentCount === 0) return null;
                             return (
@@ -1503,9 +1407,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 </div>
             )}
             
-            {/* ✅ SYSTEM MONITOR TAB (Unchanged) */}
+            {/* ✅ SYSTEM MONITOR TAB */}
             {activeTab === 'monitor' && isAdmin && (
-                /* ... (Same Monitor) ... */
                 <div className="max-w-6xl mx-auto">
                     <div className="flex justify-between items-center mb-8">
                          <div className="flex items-center gap-3">
@@ -1579,10 +1482,10 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 </div>
             )}
             
-            {/* O-NET TAB (Unchanged) */}
+            {/* O-NET TAB */}
             {activeTab === 'onet' && (
               <div className="max-w-4xl mx-auto">
-                 {/* ... O-NET Content (Same as previous) ... */}
+                 {/* ... O-NET Content (Unchanged) ... */}
                  
                  <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 mb-8 shadow-sm">
                     {!onetLevel ? (
@@ -1719,6 +1622,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                          </div>
                                      </div>
                                      <div className="flex items-center gap-2">
+                                          <button onClick={() => handleRedoAssignment(a)} className="bg-purple-50 text-purple-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-purple-100 flex items-center gap-1" title="มอบหมายซ้ำ"><Copy size={16}/> ทำซ้ำ</button>
                                           <button onClick={() => handleViewAssignment(a)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-100">ดูรายละเอียด</button>
                                           {!isDirector && <button onClick={() => handleDeleteAssignment(a.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100"><Trash2 size={16}/></button>}
                                      </div>
@@ -1874,6 +1778,11 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                              <tbody>
                                  {normalAssignments.slice().reverse().map((a) => {
                                      const submittedCount = countSubmitted(a.id);
+                                     // ✅ Fix: Calculate Total Eligible Students
+                                     const eligibleStudents = students.filter(s => !a.grade || a.grade === 'ALL' || s.grade === a.grade);
+                                     const totalEligible = eligibleStudents.length;
+                                     const notSubmittedCount = totalEligible - submittedCount;
+                                     
                                      const isExpired = new Date(a.deadline) < new Date();
                                      return (
                                          <tr key={a.id} className="border-b hover:bg-gray-50 last:border-0 transition-colors">
@@ -1889,13 +1798,21 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                                  {formatDate(a.deadline)}
                                              </td>
                                              <td className="p-3 text-center">
-                                                 <span className={`px-2 py-1 rounded-full font-bold text-xs ${submittedCount > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
-                                                     {submittedCount}
-                                                 </span>
+                                                 <div className="flex flex-col items-center">
+                                                     <span className={`px-2 py-1 rounded-full font-bold text-xs ${submittedCount > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+                                                         {submittedCount} / {totalEligible}
+                                                     </span>
+                                                     {notSubmittedCount > 0 && (
+                                                         <span className="text-[10px] text-red-500 font-medium mt-1">
+                                                             (ยังไม่ส่ง {notSubmittedCount})
+                                                         </span>
+                                                     )}
+                                                 </div>
                                              </td>
                                              <td className="p-3 text-right flex justify-end gap-2">
-                                                 <button onClick={() => handleViewAssignment(a)} className="text-blue-600 hover:bg-blue-50 p-1.5 rounded"><Eye size={16} /></button>
-                                                 <button onClick={() => handleDeleteAssignment(a.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                                                 <button onClick={() => handleRedoAssignment(a)} className="text-purple-600 hover:bg-purple-50 p-1.5 rounded" title="มอบหมายซ้ำ"><Copy size={16}/></button>
+                                                 <button onClick={() => handleViewAssignment(a)} className="text-blue-600 hover:bg-blue-50 p-1.5 rounded" title="ดูรายละเอียด"><Eye size={16} /></button>
+                                                 <button onClick={() => handleDeleteAssignment(a.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="ลบ"><Trash2 size={16}/></button>
                                              </td>
                                          </tr>
                                      );
@@ -1909,7 +1826,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
             {/* ADMIN STATS & QUESTIONS ... (Unchanged) */}
             {activeTab === 'admin_stats' && (isAdmin || isDirector) && (
-                 /* ... (Same Admin Stats View) ... */
                  <div className="max-w-6xl mx-auto">
                     <div className="flex items-center gap-3 mb-8">
                         <div className="bg-orange-100 p-3 rounded-full text-orange-600"><BarChart2 size={32}/></div>
@@ -1919,6 +1835,44 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                         </div>
                     </div>
                     
+                    {/* ✅ O-NET Stats Section */}
+                    {(() => {
+                        const onetStatsData = getOnetStats();
+                        return (
+                            <div className="mb-8">
+                                <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                    <Trophy className="text-indigo-600"/> สรุปผลการทดสอบ O-NET (จำลอง)
+                                </h3>
+                                <div className="grid md:grid-cols-2 gap-6">
+                                    {['P6', 'M3'].map(grade => (
+                                        <div key={grade} className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-sm">
+                                            <h4 className="font-bold text-indigo-900 mb-4 text-lg border-b pb-2">ระดับชั้น {GRADE_LABELS[grade]}</h4>
+                                            <div className="space-y-4">
+                                                {ONET_SUBJECTS.map(subj => {
+                                                    const info = onetStatsData[grade]?.[subj] || {sum:0, count:0};
+                                                    const avg = info.count > 0 ? Math.round(info.sum / info.count) : 0;
+                                                    return (
+                                                        <div key={subj} className="flex items-center justify-between">
+                                                            <span className="text-gray-600 font-medium">{subj}</span>
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-32 bg-gray-100 rounded-full h-2 overflow-hidden">
+                                                                    <div className={`h-full rounded-full transition-all duration-500 ${avg >= 50 ? 'bg-green-500' : 'bg-orange-500'}`} style={{width: `${avg}%`}}></div>
+                                                                </div>
+                                                                <span className="font-bold text-gray-800 w-10 text-right">{avg}%</span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    <hr className="my-8 border-gray-100"/>
+
                     {/* ✅ Grade Cards Grid for Admins/Directors */}
                     {viewLevel === 'GRADES' && (
                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-fade-in mb-8">
@@ -1927,9 +1881,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                  const getGradeStats = (grade: string) => {
                                       const gradeStudents = students.filter(s => s.grade === grade);
                                       const studentIds = gradeStudents.map(s => s.id);
-                                      
-                                      // 🟢 Exclude GAME_MODE results here
-                                      const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)) && r.subject !== 'GAME_MODE');
+                                      const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)));
                                       
                                       let totalScorePercent = 0; 
                                       let count = 0;
@@ -1971,35 +1923,12 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                           return b.avg - a.avg;
                                       });
 
-                                      // 🟢 O-NET Specific Stats (Breakdown by 4 Subjects)
-                                      let onetBreakdown: {subject: string, score: number}[] = [];
-                                      if (grade === 'P6' || grade === 'M3') {
-                                          onetBreakdown = ONET_SUBJECTS.map(subj => {
-                                              let subSum = 0;
-                                              let subCount = 0;
-                                              // Filter results that belong to assignments with title starting with [O-NET]
-                                              gradeResults.forEach(r => {
-                                                  if (r.subject !== subj) return;
-                                                  const assignment = assignments.find(a => a.id === r.assignmentId);
-                                                  if (assignment && assignment.title?.startsWith('[O-NET]')) {
-                                                       const totalQ = Number(r.totalQuestions);
-                                                       const score = Number(r.score) || 0;
-                                                       if (totalQ > 0) {
-                                                           subSum += (score / totalQ) * 100;
-                                                           subCount++;
-                                                       }
-                                                  }
-                                              });
-                                              return { subject: subj, score: subCount > 0 ? Math.round(subSum / subCount) : 0 };
-                                          });
-                                      }
-
-                                      return { studentCount: gradeStudents.length, avgScore: avg, activityCount: count, subjectStats, onetBreakdown };
+                                      return { studentCount: gradeStudents.length, avgScore: avg, activityCount: count, subjectStats };
                                   };
 
                                  const gStats = getGradeStats(g);
                                  return (
-                                    <button key={g} onClick={() => { setSelectedGradeFilter(g); setViewLevel('LIST'); }} className="bg-white hover:bg-orange-50 p-6 rounded-2xl border border-gray-100 shadow-sm transition-all hover:border-orange-200 text-left group h-full flex flex-col relative overflow-hidden">
+                                    <button key={g} onClick={() => { setSelectedGradeFilter(g); setViewLevel('LIST'); }} className="bg-white hover:bg-orange-50 p-6 rounded-2xl border border-gray-100 shadow-sm transition-all hover:border-orange-200 text-left group">
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="bg-orange-50 p-2 rounded-lg text-orange-600 group-hover:bg-white"><GraduationCap size={24}/></div>
                                             <span className="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{GRADE_LABELS[g]}</span>
@@ -2007,8 +1936,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                         <div className="text-2xl font-black text-gray-800 mb-1">{gStats.avgScore}%</div>
                                         <div className="text-sm text-gray-500">คะแนนเฉลี่ยรวม</div>
 
-                                        {/* Detailed Subject Breakdown with Scroll */}
-                                        <div className="mt-4 pt-4 border-t border-gray-100 space-y-3 flex-1 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
+                                        {/* Detailed Subject Breakdown with Visual Progress Bars */}
+                                        {gStats.subjectStats.length > 0 && (
+                                            <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
                                                 {gStats.subjectStats.map((s, idx) => {
                                                     // Color Logic
                                                     let barColor = 'bg-gray-200';
@@ -2030,39 +1960,17 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                                                 <span className={`font-medium truncate pr-2 ${s.hasData ? 'text-gray-700' : 'text-gray-400'}`}>{s.name}</span>
                                                                 <span className={`font-bold ${textColor}`}>{s.hasData ? `${s.avg}%` : 'N/A'}</span>
                                                             </div>
-                                                            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden shadow-inner">
+                                                            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden shadow-inner">
                                                                 <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${s.hasData ? width : 0}%` }}></div>
                                                             </div>
                                                         </div>
                                                     );
                                                 })}
-                                        </div>
-                                        
-                                        {/* 🟢 O-NET Specific Display Grid */}
-                                        {gStats.onetBreakdown.length > 0 && (
-                                            <div className="mt-3 bg-indigo-50 p-2 rounded-lg border border-indigo-100">
-                                                <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 mb-1"><Crown size={12}/> ผลการทดสอบ O-NET (จำลอง)</div>
-                                                <div className="grid grid-cols-2 gap-1">
-                                                    {gStats.onetBreakdown.map(o => {
-                                                        let label = o.subject;
-                                                        if (o.subject === 'ภาษาอังกฤษ') label = 'Eng';
-                                                        else if (o.subject === 'ภาษาไทย') label = 'ไทย';
-                                                        else if (o.subject === 'คณิตศาสตร์') label = 'คณิต';
-                                                        else if (o.subject === 'วิทยาศาสตร์') label = 'วิทย์';
-                                                        else label = o.subject.substring(0, 6);
-
-                                                        return (
-                                                            <div key={o.subject} className={`text-[10px] px-1 py-0.5 rounded text-center border ${o.score >= 50 ? 'bg-white border-indigo-200 text-indigo-900' : 'bg-red-50 border-red-100 text-red-500'}`}>
-                                                                {label} <b>{o.score}</b>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
                                             </div>
                                         )}
                                         
-                                        <div className="mt-3 pt-2 border-t border-dashed border-gray-100 flex justify-between text-[10px] font-medium text-gray-400">
-                                            <span>นร. {gStats.studentCount}</span>
+                                        <div className="mt-4 pt-4 border-t border-dashed border-gray-100 flex justify-between text-xs font-medium text-gray-400">
+                                            <span>นักเรียน {gStats.studentCount} คน</span>
                                             <span>กิจกรรม {gStats.activityCount}</span>
                                         </div>
                                     </button>
@@ -2261,56 +2169,21 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             <span className="text-xs font-normal text-gray-500">แสดงเฉพาะ: {showMyQuestionsOnly ? 'ของฉัน' : 'ทั้งหมด'}</span>
                         </div>
                         <div className="divide-y divide-gray-100">
-                            {/* Updated Question List Rendering with Full Details */}
                             {currentQuestions.length > 0 ? currentQuestions.map((q, idx) => (
-                                <div key={q.id} className="p-5 border-b last:border-0 hover:bg-gray-50 transition relative group">
-                                    {/* Question Text */}
-                                    <div className="flex justify-between items-start mb-3">
-                                        <div className="font-bold text-gray-800 text-lg pr-16">{idx + 1 + ((qBankPage - 1) * ITEMS_PER_PAGE)}. {q.text}</div>
-                                        
-                                        {/* Actions (Absolute top-right for cleaner look) */}
+                                <div key={q.id} className="p-5 hover:bg-blue-50 transition">
+                                    <div className="flex justify-between">
+                                        <span className="font-bold text-gray-800">{q.text}</span>
                                         {normalizeId(q.teacherId) === normalizeId(teacher.id) && (
-                                            <div className="flex gap-2 absolute top-5 right-5 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 backdrop-blur-sm p-1 rounded-lg shadow-sm border">
-                                                <button onClick={() => handleEditQuestion(q)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded" title="แก้ไข"><Edit size={16}/></button>
-                                                <button onClick={() => handleDeleteQuestion(q.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded" title="ลบ"><Trash2 size={16}/></button>
+                                            <div className="flex gap-2">
+                                                <button onClick={()=>handleEditQuestion(q)}><Edit size={16} className="text-blue-500"/></button>
+                                                <button onClick={()=>handleDeleteQuestion(q.id)}><Trash2 size={16} className="text-red-500"/></button>
                                             </div>
                                         )}
                                     </div>
-
-                                    {/* Image if exists */}
-                                    {q.image && (
-                                        <div className="mb-3">
-                                            <img src={q.image} alt="Question" className="h-32 object-contain rounded-lg border bg-white" />
-                                        </div>
-                                    )}
-
-                                    {/* Choices Grid */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 text-sm">
-                                        {q.choices.map((c, i) => {
-                                            const isCorrect = String(q.correctChoiceId) === String(i + 1) || String(q.correctChoiceId) === String(c.id);
-                                            return (
-                                                <div key={i} className={`p-2 rounded border flex items-center gap-2 ${isCorrect ? 'bg-green-50 border-green-200 text-green-800' : 'bg-white border-gray-200 text-gray-600'}`}>
-                                                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold border ${isCorrect ? 'bg-green-500 text-white border-green-500' : 'bg-gray-100 text-gray-500 border-gray-300'}`}>
-                                                        {['ก', 'ข', 'ค', 'ง'][i]}
-                                                    </span>
-                                                    <span>{c.text}</span>
-                                                    {isCorrect && <CheckCircle size={14} className="ml-auto text-green-600" />}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-
-                                    {/* Explanation & Metadata */}
-                                    <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-2 text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">
-                                        <div className="flex-1">
-                                            <div className="font-bold text-gray-700 mb-1 flex items-center gap-1"><HelpCircle size={12}/> เฉลย/คำอธิบาย:</div>
-                                            <div className="text-gray-600">{q.explanation || '-'}</div>
-                                        </div>
-                                        <div className="flex gap-2 text-[10px] uppercase font-mono tracking-wide opacity-70">
-                                            <span className="bg-white border px-1.5 py-0.5 rounded">ID: {q.id}</span>
-                                            <span className="bg-white border px-1.5 py-0.5 rounded">{q.subject}</span>
-                                            <span className="bg-white border px-1.5 py-0.5 rounded">{GRADE_LABELS[q.grade || ''] || q.grade}</span>
-                                        </div>
+                                    <div className="text-xs text-gray-400 mt-2 flex gap-3">
+                                        <span>ID: {q.id}</span>
+                                        <span className="bg-gray-100 px-1 rounded text-gray-500">{GRADE_LABELS[q.grade || ''] || q.grade}</span>
+                                        <span>วิชา: {q.subject}</span>
                                     </div>
                                 </div>
                             )) : <div className="p-10 text-center text-gray-400">ไม่พบข้อสอบในหมวดนี้</div>}
@@ -2403,7 +2276,6 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
             {/* TEACHER MANAGEMENT TAB */}
             {activeTab === 'teachers' && isAdmin && (
-                /* ... (Teacher Management Tab) ... */
                 <div className="max-w-6xl mx-auto" id="teacher-form">
                     {!selectedSchoolForView ? (
                         <div>
