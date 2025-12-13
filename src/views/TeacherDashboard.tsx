@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Teacher, Student, Assignment, Question, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types';
 import { UserPlus, BarChart2, FileText, LogOut, Gamepad2, Calendar, User, Building, UserCog, MonitorSmartphone, Database, ArrowLeft, Trophy, UploadCloud, RefreshCw, AlertTriangle, ToggleLeft, ToggleRight, Trash2, Edit, PlusCircle, CreditCard, X, GraduationCap, KeyRound, Sparkles, List, CheckCircle, Clock, Wand2, BrainCircuit, Loader2, Save, Copy } from 'lucide-react';
@@ -69,11 +70,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
 
   // Admin Stats State
   const [impersonateId, setImpersonateId] = useState('');
-  // Fix: Removed selectedStudentForStats from TeacherDashboard state as it is handled within StatsViewer, 
-  // or if needed for Admin view, we define it here but StatsViewer handles its own modal. 
-  // For Admin Stats drill down, we will use a local state inside the render block or a new state.
-  // Actually, for the Admin Stats view in this file, we might need it.
-  // Let's add it back just in case the Admin Stats view uses it directly.
+  
   const [selectedStudentForStats, setSelectedStudentForStats] = useState<Student | null>(null);
 
   // ✅ Permissions Logic
@@ -224,9 +221,13 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     setLoading(false);
   };
   
-  // ✅ New Logic: Calculate O-NET Specific Stats
+  // ✅ UPDATED: Calculate O-NET Stats from REAL DATA
   const getOnetStats = () => {
-      const onetAssignIds = new Set(assignments.filter(a => a.title && a.title.startsWith('[O-NET]')).map(a => a.id));
+      // 1. Filter Assignments that are O-NET related
+      const onetAssignments = assignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
+      const onetAssignIds = new Set(onetAssignments.map(a => a.id));
+      
+      // 2. Filter Results that match these assignments
       const onetResults = stats.filter(r => onetAssignIds.has(r.assignmentId));
       
       const data: Record<string, Record<string, {sum: number, count: number}>> = {
@@ -244,8 +245,14 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
           // If student grade matches P6 or M3
           if (student && (student.grade === 'P6' || student.grade === 'M3')) {
               const g = student.grade;
-              const s = r.subject; // Should match ONET_SUBJECTS keys
+              let s = r.subject; 
               
+              // Normalize Subject Names (Database might return English enum)
+              if (s === 'MATH' || s === 'Mathematics') s = 'คณิตศาสตร์';
+              if (s === 'THAI') s = 'ภาษาไทย';
+              if (s === 'SCIENCE') s = 'วิทยาศาสตร์';
+              if (s === 'ENGLISH') s = 'ภาษาอังกฤษ';
+
               if (data[g] && data[g][s]) {
                   const totalQ = Number(r.totalQuestions);
                   if (totalQ > 0) {
@@ -1038,7 +1045,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                         return (
                             <div className="mb-8">
                                 <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                    <Trophy className="text-indigo-600"/> สรุปผลการทดสอบ O-NET (จำลอง)
+                                    <Trophy className="text-indigo-600"/> สรุปผลการทดสอบ O-NET (จากผลการฝึกฝนจริง)
                                 </h3>
                                 <div className="grid md:grid-cols-2 gap-6">
                                     {['P6', 'M3'].map(grade => (

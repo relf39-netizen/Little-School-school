@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles, RefreshCw, Trophy, Backpack, AlertCircle, Clock } from 'lucide-react';
+import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles, RefreshCw, Trophy, Backpack, AlertCircle, Clock, FileText, Dumbbell } from 'lucide-react';
 import { Student, Assignment, ExamResult, SubjectConfig } from '../types';
 
 interface DashboardProps {
@@ -39,6 +39,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   onRefreshSubjects
 }) => {
   const [view, setView] = useState<'main' | 'history' | 'onet' | 'inventory'>('main');
+  
+  // State สำหรับเลือก Tab ในหน้าประวัติ (Homework vs Practice)
+  const [historyTab, setHistoryTab] = useState<'homework' | 'practice'>('homework');
 
   const GRADE_LABELS: Record<string, string> = { 'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3', 'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6', 'M1': 'ม.1', 'M2': 'ม.2', 'M3': 'ม.3', 'ALL': 'ทุกชั้น' };
 
@@ -66,7 +69,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   // --- Logic การบ้าน (Assignments) ---
-  // 1. กรองการบ้านทั้งหมดที่เป็นของโรงเรียนและระดับชั้นนี้
   const myAssignments = assignments.filter(a => {
       if (a.school !== student.school) return false;
       if (a.grade && a.grade !== 'ALL' && student.grade) {
@@ -75,25 +77,23 @@ const Dashboard: React.FC<DashboardProps> = ({
       return true;
   });
   
-  // 2. แยกประเภท O-NET กับ ทั่วไป
   const onetAssignments = myAssignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
   const generalAssignments = myAssignments.filter(a => !a.title || !a.title.startsWith('[O-NET]'));
 
-  // 3. Logic: การบ้านทั่วไปที่ "ยังไม่เสร็จ" (STRICT FILTER)
+  // งานค้าง
   const pendingGeneral = generalAssignments.filter(a => !checkIsDone(a.id));
-
-  // 4. Logic: O-NET
-  const finishedOnet = onetAssignments.filter(a => checkIsDone(a.id));
   const pendingOnet = onetAssignments.filter(a => !checkIsDone(a.id));
+  
+  // งานเสร็จแล้ว (สำหรับการบ้าน)
+  const finishedOnet = onetAssignments.filter(a => checkIsDone(a.id));
 
-  // จัดเรียง: งานค้างให้เรียงตามกำหนดส่ง (ใกล้หมดเขตขึ้นก่อน)
+  // จัดเรียงงานค้าง
   pendingGeneral.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
   
   // --- Logic ประวัติ (History) ---
-  // 🟢 แก้ไข: ดึงข้อมูลจาก examResults โดยตรง เพื่อให้เห็นทุกรายการที่เคยทำ (รวมถึงงานที่ไม่มี Assignment ID แล้ว)
   const myHistory = examResults
     .filter(r => String(r.studentId) === String(student.id))
-    .sort((a, b) => b.timestamp - a.timestamp); // ใหม่สุดขึ้นก่อน
+    .sort((a, b) => b.timestamp - a.timestamp); 
 
   // กรองรายวิชา
   const mySubjects = subjects.filter(s => {
@@ -182,28 +182,50 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // --- View: History ---
   if (view === 'history') {
+    // 🟢 แบ่งข้อมูลเป็น 2 ส่วน: การบ้าน (มี assignmentId) และ ฝึกฝน (ไม่มี assignmentId)
+    const homeworkHistory = myHistory.filter(r => r.assignmentId);
+    const practiceHistory = myHistory.filter(r => !r.assignmentId);
+    
+    const displayList = historyTab === 'homework' ? homeworkHistory : practiceHistory;
+
     return (
       <div className="space-y-6 pb-20 animate-fade-in">
         <button onClick={() => setView('main')} className="text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-4">
           <ArrowLeft size={20} /> กลับหน้าแดชบอร์ด
         </button>
 
-        <div className="flex items-center gap-3 mb-6">
+        <div className="flex items-center gap-3 mb-4">
           <div className="bg-yellow-100 p-3 rounded-2xl text-yellow-600">
             <History size={32} />
           </div>
           <div>
             <h2 className="text-2xl font-bold text-gray-800">ประวัติการส่งงาน</h2>
-            <p className="text-gray-500">ผลการทดสอบทั้งหมด ({myHistory.length} รายการ)</p>
+            <p className="text-gray-500">รวมรายการที่ทำเสร็จแล้ว</p>
           </div>
         </div>
 
+        {/* 🟢 TABS BUTTONS */}
+        <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
+            <button 
+                onClick={() => setHistoryTab('homework')} 
+                className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${historyTab === 'homework' ? 'bg-white text-yellow-600 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}
+            >
+                <FileText size={16} /> การบ้านที่ส่งครู ({homeworkHistory.length})
+            </button>
+            <button 
+                onClick={() => setHistoryTab('practice')} 
+                className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${historyTab === 'practice' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}
+            >
+                <Dumbbell size={16} /> ฝึกฝนเอง ({practiceHistory.length})
+            </button>
+        </div>
+
         <div className="space-y-4">
-          {myHistory.length > 0 ? (
-            myHistory.map(result => {
-              // หา Assignment ต้นฉบับ (ถ้ามี)
+          {displayList.length > 0 ? (
+            displayList.map(result => {
+              // หา Assignment ต้นฉบับ (ถ้ามี) เพื่อเอาชื่อมาแสดง
               const assignment = assignments.find(a => String(a.id) === String(result.assignmentId));
-              const title = assignment?.title || (assignment ? assignment.subject : (result.assignmentId ? 'งานที่ถูกลบไปแล้ว' : 'ฝึกฝนทั่วไป'));
+              const title = assignment?.title || (assignment ? assignment.subject : (result.assignmentId ? 'แบบฝึกหัด (ไม่ระบุ)' : `ฝึกฝน: ${result.subject}`));
               const isOnet = title.startsWith('[O-NET]');
               
               const score = result.score;
@@ -219,7 +241,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                    <div className="flex flex-col sm:flex-row justify-between w-full items-start sm:items-center gap-4">
                        <div>
                          <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isOnet ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-50 text-blue-600'}`}>{result.subject}</span>
+                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isOnet ? 'bg-indigo-100 text-indigo-700' : historyTab === 'practice' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>{result.subject}</span>
                             <span className="text-xs text-gray-400">{new Date(result.timestamp).toLocaleString('th-TH')}</span>
                          </div>
                          <div className="font-bold text-gray-800 text-lg">
@@ -247,7 +269,18 @@ const Dashboard: React.FC<DashboardProps> = ({
             })
           ) : (
             <div className="text-center py-20 text-gray-400 bg-white rounded-3xl border-2 border-dashed">
-              ยังไม่มีประวัติการส่งงาน
+              {historyTab === 'homework' ? (
+                  <>
+                    <FileText size={48} className="mx-auto mb-2 opacity-20"/>
+                    <p>ยังไม่มีประวัติการส่งการบ้าน</p>
+                  </>
+              ) : (
+                  <>
+                    <Dumbbell size={48} className="mx-auto mb-2 opacity-20"/>
+                    <p>ยังไม่มีประวัติการฝึกฝนเอง</p>
+                    <button onClick={() => setView('main')} className="text-blue-500 underline text-sm mt-2">ไปฝึกฝนกันเถอะ!</button>
+                  </>
+              )}
             </div>
           )}
         </div>
