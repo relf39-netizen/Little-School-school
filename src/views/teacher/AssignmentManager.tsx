@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Assignment, Question, SubjectConfig, Teacher, Student, ExamResult } from '../../types';
-import { Calendar, ArrowRight, RefreshCw, BrainCircuit, Save, Copy, Eye, Trash2, Loader2, CheckCircle, Clock, X, FileText } from 'lucide-react';
+import { Calendar, ArrowRight, RefreshCw, BrainCircuit, Save, RotateCcw, Eye, Trash2, Loader2, CheckCircle, Clock, X, FileText } from 'lucide-react';
 import { addAssignment, deleteAssignment, addQuestion, getQuestionsBySubject } from '../../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../../services/aiService';
 
@@ -100,13 +100,29 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
   };
 
   const handleRedoAssignment = async (original: Assignment) => {
-      if(!confirm(`ต้องการมอบหมายงาน "${original.title || original.subject}" ให้นักเรียนทำอีกครั้งใช่ไหม?`)) return;
+      if(!confirm(`ต้องการ "มอบหมายซ้ำ" งาน "${original.title || original.subject}" ให้นักเรียนทำอีกครั้งใช่ไหม?\n\n(ระบบจะสร้างการบ้านชุดใหม่ สถิติเดิมจะยังคงอยู่)`)) return;
       
       setIsProcessing(true);
+      // Default deadline: 3 days from now
       const date = new Date();
       date.setDate(date.getDate() + 3);
       const newDeadline = date.toISOString().split('T')[0];
       
+      // Smart Title Logic: Avoid stacking "(Revise) (Revise)"
+      let baseTitle = original.title || original.subject;
+      
+      // Check if it already has a "Round X" or date suffix to clean it up or append
+      const suffixRegex = /\(รอบเพิ่มเติม.*?\)/;
+      let newTitle = baseTitle;
+      
+      if (suffixRegex.test(baseTitle)) {
+          // If already has suffix, replace it or append date to distinguish
+          const today = new Date().toLocaleDateString('th-TH', {day: 'numeric', month: 'numeric'});
+          newTitle = `${baseTitle.replace(suffixRegex, '').trim()} (รอบเพิ่มเติม ${today})`;
+      } else {
+          newTitle = `${baseTitle} (รอบเพิ่มเติม)`;
+      }
+
       const success = await addAssignment(
           original.school,
           original.subject,
@@ -114,12 +130,12 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
           original.questionCount,
           newDeadline,
           original.createdBy,
-          original.title ? `${original.title} (รอบเพิ่มเติม)` : `${original.subject} (รอบเพิ่มเติม)`
+          newTitle
       );
       
       setIsProcessing(false);
       if(success) {
-          alert('✅ มอบหมายงานซ้ำเรียบร้อยแล้ว');
+          alert('✅ มอบหมายงานซ้ำเรียบร้อยแล้ว\nนักเรียนจะเห็นงานชิ้นใหม่ที่หน้าแดชบอร์ดทันที');
           onRefresh();
       } else {
           alert('เกิดข้อผิดพลาด');
@@ -315,7 +331,7 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
                                         </div>
                                     </td>
                                     <td className="p-3 text-right flex justify-end gap-2">
-                                        <button onClick={() => handleRedoAssignment(a)} className="text-purple-600 hover:bg-purple-50 p-1.5 rounded" title="มอบหมายซ้ำ"><Copy size={16}/></button>
+                                        <button onClick={() => handleRedoAssignment(a)} className="bg-purple-50 text-purple-600 hover:bg-purple-100 p-1.5 rounded border border-purple-200" title="มอบหมายซ้ำ (Redo)"><RotateCcw size={16}/></button>
                                         <button onClick={() => { setSelectedAssignment(a); setAssignmentModalTab('status'); }} className="text-blue-600 hover:bg-blue-50 p-1.5 rounded" title="ดูรายละเอียด"><Eye size={16} /></button>
                                         <button onClick={() => handleDeleteAssignment(a.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="ลบ"><Trash2 size={16}/></button>
                                     </td>

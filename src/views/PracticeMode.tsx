@@ -1,16 +1,17 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Question, Subject } from '../types';
 import { CheckCircle, XCircle, ArrowRight, RefreshCw, ArrowLeft, Volume2, VolumeX } from 'lucide-react';
 import { speak, stopSpeak } from '../utils/soundUtils';
 
 interface PracticeModeProps {
-  onFinish: (score: number, total: number) => void;
+  onFinish: (score: number, total: number, assignmentId?: string) => void;
   onBack: () => void;
-  questions: Question[]; // รับคำถามเข้ามาจาก Google Sheet
+  questions: Question[];
+  assignmentId?: string; 
 }
 
-const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions: allQuestions }) => {
+const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions: allQuestions, assignmentId }) => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
@@ -18,22 +19,24 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
   const [score, setScore] = useState(0);
   const [loading, setLoading] = useState(true);
   
-  // ✅ สถานะเปิด/ปิดเสียงอ่าน (ค่าเริ่มต้น: ปิด = false)
-  // เริ่มต้นเป็น false ตามที่ต้องการ (ต้องกดปุ่มลำโพงก่อนถึงจะมีเสียง)
+  // ✅ ใช้ useRef เก็บค่า assignmentId เพื่อให้มั่นใจว่าค่าไม่หายระหว่าง Re-render
+  const assignmentIdRef = useRef(assignmentId);
   const [isTTSEnabled, setIsTTSEnabled] = useState(false);
 
-  const choiceLabels = ['A', 'B', 'C', 'D']; // ป้ายกำกับตัวเลือก
+  const choiceLabels = ['A', 'B', 'C', 'D']; 
+
+  // อัปเดต ref เมื่อ prop เปลี่ยน
+  useEffect(() => {
+    if (assignmentId) {
+        assignmentIdRef.current = assignmentId;
+    }
+  }, [assignmentId]);
 
   useEffect(() => {
-    // กระบวนการเตรียมข้อสอบ: สุ่มโจทย์ + ตัดเหลือ 10 ข้อ + สลับช้อยส์
+    // กระบวนการเตรียมข้อสอบ
     if (allQuestions && allQuestions.length > 0) {
-        // 1. สุ่มลำดับโจทย์ทั้งหมดก่อน (Shuffle Questions)
         const shuffledQuestions = [...allQuestions].sort(() => 0.5 - Math.random());
-
-        // 2. ตัดมาแค่ 10 ข้อ (หรือน้อยกว่าถ้าในคลังมีไม่ถึง 10 ข้อ)
         const limitedQuestions = shuffledQuestions.slice(0, 10);
-
-        // 3. สลับตำแหน่งตัวเลือกในแต่ละข้อ (Shuffle Choices)
         const finalQuestions = limitedQuestions.map(q => ({
             ...q,
             choices: [...q.choices].sort(() => 0.5 - Math.random())
@@ -42,23 +45,18 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
         setQuestions(finalQuestions);
         setLoading(false);
     } else {
-        setLoading(false); // กรณีไม่มีคำถามเลย
+        setLoading(false);
     }
   }, [allQuestions]);
 
   const currentQuestion = questions[currentIndex];
 
-  // ✅ ฟังก์ชันอ่านเสียง (โจทย์ -> ตัวเลือก หรือ เฉลย)
   const playAudio = () => {
     if (!currentQuestion) return;
-    
-    stopSpeak(); // หยุดเสียงเก่าก่อน
-    
+    stopSpeak(); 
     if (isSubmitted) {
-        // อ่านเฉลย
         speak("เฉลย.. " + currentQuestion.explanation);
     } else {
-        // อ่านโจทย์และตัวเลือก
         let textToRead = "คำถาม.. " + currentQuestion.text;
         currentQuestion.choices.forEach((c, i) => {
             textToRead += `. ข้อ ${choiceLabels[i]}.. ${c.text}`;
@@ -67,14 +65,12 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
     }
   };
 
-  // ✅ Effect: อ่านอัตโนมัติเมื่อเปิดเสียง และ เปลี่ยนข้อ/กดส่ง
   useEffect(() => {
     if (isTTSEnabled) {
         playAudio();
     } else {
         stopSpeak();
     }
-    // Cleanup
     return () => stopSpeak();
   }, [currentIndex, isSubmitted, isTTSEnabled]);
 
@@ -85,11 +81,9 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
 
   const handleSubmit = () => {
     if (!selectedChoice) return;
-    
     const isCorrect = selectedChoice === currentQuestion.correctChoiceId;
     setIsSubmitted(true);
     
-    // เสียง Feedback (แยกจาก TTS หลัก) -> ใช้ speak แทรกได้เลย
     if (isCorrect) {
       setScore(prev => prev + 1);
       if(!isTTSEnabled) speak("ถูกต้องครับ เก่งมาก");
@@ -104,8 +98,9 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
       setSelectedChoice(null);
       setIsSubmitted(false);
     } else {
-      // ✅ แก้ไข: ส่ง score ล่าสุดไปเลย ไม่ต้องบวกเพิ่มอีก (เพราะบวกไปแล้วตอน handleSubmit)
-      onFinish(score, questions.length);
+      // 🟢 ใช้ค่าจาก Ref เพื่อความชัวร์ 100%
+      console.log("Finishing Exam with Assignment ID:", assignmentIdRef.current);
+      onFinish(score, questions.length, assignmentIdRef.current);
     }
   };
 
@@ -122,33 +117,15 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
     );
   }
 
-  // ชุดสีสำหรับปุ่มตัวเลือก (ฟ้า, เขียว, ส้ม, ชมพู)
   const choiceColors = [
-    { 
-      base: 'bg-sky-50 border-sky-200 text-sky-800', 
-      hover: 'hover:bg-sky-100 hover:border-sky-300 hover:-translate-y-1', 
-      selected: 'bg-sky-100 border-sky-500 ring-2 ring-sky-300 shadow-md scale-[1.02]' 
-    },
-    { 
-      base: 'bg-emerald-50 border-emerald-200 text-emerald-800', 
-      hover: 'hover:bg-emerald-100 hover:border-emerald-300 hover:-translate-y-1', 
-      selected: 'bg-emerald-100 border-emerald-500 ring-2 ring-emerald-300 shadow-md scale-[1.02]' 
-    },
-    { 
-      base: 'bg-amber-50 border-amber-200 text-amber-800', 
-      hover: 'hover:bg-amber-100 hover:border-amber-300 hover:-translate-y-1', 
-      selected: 'bg-amber-100 border-amber-500 ring-2 ring-amber-300 shadow-md scale-[1.02]' 
-    },
-    { 
-      base: 'bg-rose-50 border-rose-200 text-rose-800', 
-      hover: 'hover:bg-rose-100 hover:border-rose-300 hover:-translate-y-1', 
-      selected: 'bg-rose-100 border-rose-500 ring-2 ring-rose-300 shadow-md scale-[1.02]' 
-    }
+    { base: 'bg-sky-50 border-sky-200 text-sky-800', hover: 'hover:bg-sky-100 hover:border-sky-300 hover:-translate-y-1', selected: 'bg-sky-100 border-sky-500 ring-2 ring-sky-300 shadow-md scale-[1.02]' },
+    { base: 'bg-emerald-50 border-emerald-200 text-emerald-800', hover: 'hover:bg-emerald-100 hover:border-emerald-300 hover:-translate-y-1', selected: 'bg-emerald-100 border-emerald-500 ring-2 ring-emerald-300 shadow-md scale-[1.02]' },
+    { base: 'bg-amber-50 border-amber-200 text-amber-800', hover: 'hover:bg-amber-100 hover:border-amber-300 hover:-translate-y-1', selected: 'bg-amber-100 border-amber-500 ring-2 ring-amber-300 shadow-md scale-[1.02]' },
+    { base: 'bg-rose-50 border-rose-200 text-rose-800', hover: 'hover:bg-rose-100 hover:border-rose-300 hover:-translate-y-1', selected: 'bg-rose-100 border-rose-500 ring-2 ring-rose-300 shadow-md scale-[1.02]' }
   ];
 
   return (
     <div className="max-w-3xl mx-auto">
-      {/* Progress Header */}
       <div className="flex items-center justify-between mb-6">
         <button onClick={onBack} className="text-gray-500 hover:text-gray-700 flex items-center gap-1">
           <ArrowLeft size={20} /> ออก
@@ -164,15 +141,12 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
         </span>
       </div>
 
-      {/* Question Card */}
       <div className="bg-white rounded-3xl shadow-lg p-6 md:p-8 mb-6 border-b-4 border-gray-200">
         <div className="flex justify-between items-start mb-3">
             <div className="inline-block bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">
             {currentQuestion.subject}
             </div>
             
-            {/* 🟢 ปุ่มเปิด/ปิดเสียงอ่านอัตโนมัติ (Toggle TTS) */}
-            {/* ค่าเริ่มต้น: ปิด (VolumeX) -> กดแล้วเปิด (Volume2) */}
             <button 
                onClick={() => setIsTTSEnabled(!isTTSEnabled)} 
                className={`p-2 rounded-full transition-all border-2 ${isTTSEnabled ? 'bg-blue-100 text-blue-600 border-blue-200 shadow-inner' : 'bg-gray-100 text-gray-400 border-transparent hover:bg-gray-200'}`}
@@ -186,7 +160,6 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
             <h2 className="text-xl md:text-2xl font-bold text-gray-800 leading-relaxed flex-1">
                 {currentQuestion.text}
             </h2>
-            {/* ปุ่มอ่านเฉพาะโจทย์ (กดฟังเองได้เสมอ) */}
             <button 
                 onClick={() => speak(currentQuestion.text)} 
                 className="p-2 text-gray-400 hover:text-blue-500 bg-gray-50 hover:bg-blue-50 rounded-full transition-colors flex-shrink-0"
@@ -204,7 +177,7 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
 
         <div className="space-y-4">
           {currentQuestion.choices.map((choice, index) => {
-            const colorTheme = choiceColors[index % 4]; // วนสีตามลำดับ
+            const colorTheme = choiceColors[index % 4]; 
             const label = choiceLabels[index] || (index + 1).toString();
             
             let buttonStyle = `border-2 shadow-sm transition-all duration-200 relative flex items-center gap-4 ${colorTheme.base} ${colorTheme.hover}`;
@@ -235,7 +208,6 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
                 onClick={() => !isSubmitted && handleChoiceSelect(choice.id)}
                 className={`w-full p-3 md:p-4 rounded-2xl text-left text-lg ${buttonStyle} ${!isSubmitted ? 'cursor-pointer' : ''}`}
               >
-                {/* Label Circle A, B, C, D */}
                 <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg transition-colors ${badgeStyle}`}>
                    {label}
                 </div>
@@ -251,7 +223,6 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
                   )}
                 </div>
 
-                {/* 🔊 ปุ่มลำโพงสำหรับตัวเลือก (กดฟังเอง) */}
                 <button 
                     onClick={(e) => {
                         e.stopPropagation();
@@ -275,7 +246,6 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
         </div>
       </div>
 
-      {/* Footer Actions */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 md:static md:bg-transparent md:border-0 md:p-0 z-20">
         <div className="max-w-3xl mx-auto">
           {!isSubmitted ? (
@@ -297,7 +267,6 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
                     <h3 className="font-bold text-green-800 flex items-center gap-2 text-lg">
                     <CheckCircle size={24} /> เฉลย
                     </h3>
-                    {/* 🔊 ปุ่มลำโพงสำหรับเฉลย */}
                     <button 
                         onClick={() => speak(currentQuestion.explanation)}
                         className="p-2 bg-white rounded-full text-green-600 hover:bg-green-100 shadow-sm border border-green-100 transition-colors"

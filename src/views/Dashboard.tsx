@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles, RefreshCw, Trophy, Sword, Crown, Gift, Backpack } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles, RefreshCw, Trophy, Backpack, AlertCircle, Clock } from 'lucide-react';
 import { Student, Assignment, ExamResult, SubjectConfig } from '../types';
 
 interface DashboardProps {
@@ -40,9 +40,33 @@ const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [view, setView] = useState<'main' | 'history' | 'onet' | 'inventory'>('main');
 
-  const GRADE_LABELS: Record<string, string> = { 'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3', 'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6', 'ALL': 'ทุกชั้น' };
+  const GRADE_LABELS: Record<string, string> = { 'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3', 'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6', 'M1': 'ม.1', 'M2': 'ม.2', 'M3': 'ม.3', 'ALL': 'ทุกชั้น' };
 
-  // กรองข้อมูลการบ้าน
+  // Debug Log
+  useEffect(() => {
+      console.log("--- DASHBOARD DATA DEBUG ---");
+      console.log("Student:", student.id, student.name);
+      console.log("Results Count:", examResults.filter(r => String(r.studentId) === String(student.id)).length);
+  }, [student, examResults]);
+
+  // ✅ Helper: Get the latest result for a specific assignment
+  const getLatestResult = (assignmentId: string) => {
+      const relevant = examResults.filter(r => 
+          String(r.assignmentId).trim() === String(assignmentId).trim() && 
+          String(r.studentId).trim() === String(student.id).trim()
+      );
+      if (relevant.length === 0) return null;
+      relevant.sort((a, b) => b.timestamp - a.timestamp);
+      return relevant[0];
+  };
+
+  // Helper to check if assignment is done safely
+  const checkIsDone = (assignmentId: string) => {
+      return !!getLatestResult(assignmentId);
+  };
+
+  // --- Logic การบ้าน (Assignments) ---
+  // 1. กรองการบ้านทั้งหมดที่เป็นของโรงเรียนและระดับชั้นนี้
   const myAssignments = assignments.filter(a => {
       if (a.school !== student.school) return false;
       if (a.grade && a.grade !== 'ALL' && student.grade) {
@@ -51,47 +75,41 @@ const Dashboard: React.FC<DashboardProps> = ({
       return true;
   });
   
-  // ✅ แยกประเภทการบ้าน (ทั่วไป vs O-NET)
+  // 2. แยกประเภท O-NET กับ ทั่วไป
   const onetAssignments = myAssignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
   const generalAssignments = myAssignments.filter(a => !a.title || !a.title.startsWith('[O-NET]'));
 
-  // Logic สำหรับ General Assignments (แสดงในกล่องส้ม)
-  const pendingGeneral = generalAssignments.filter(a => !examResults.some(r => r.assignmentId === a.id));
-  const finishedGeneral = generalAssignments.filter(a => examResults.some(r => r.assignmentId === a.id));
-  
-  // Logic สำหรับ O-NET (แสดงในหน้า O-NET)
-  const finishedOnet = onetAssignments.filter(a => examResults.some(r => r.assignmentId === a.id));
-  const pendingOnet = onetAssignments.filter(a => !examResults.some(r => r.assignmentId === a.id));
+  // 3. Logic: การบ้านทั่วไปที่ "ยังไม่เสร็จ" (STRICT FILTER)
+  const pendingGeneral = generalAssignments.filter(a => !checkIsDone(a.id));
 
-  // เรียงลำดับ
+  // 4. Logic: O-NET
+  const finishedOnet = onetAssignments.filter(a => checkIsDone(a.id));
+  const pendingOnet = onetAssignments.filter(a => !checkIsDone(a.id));
+
+  // จัดเรียง: งานค้างให้เรียงตามกำหนดส่ง (ใกล้หมดเขตขึ้นก่อน)
   pendingGeneral.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
   
-  // รวมประวัติทั้งหมด
-  const allFinished = [...finishedGeneral, ...finishedOnet];
-  allFinished.sort((a, b) => {
-      const resultA = examResults.find(r => r.assignmentId === a.id);
-      const resultB = examResults.find(r => r.assignmentId === b.id);
-      return (resultB?.timestamp || 0) - (resultA?.timestamp || 0);
-  });
+  // --- Logic ประวัติ (History) ---
+  // 🟢 แก้ไข: ดึงข้อมูลจาก examResults โดยตรง เพื่อให้เห็นทุกรายการที่เคยทำ (รวมถึงงานที่ไม่มี Assignment ID แล้ว)
+  const myHistory = examResults
+    .filter(r => String(r.studentId) === String(student.id))
+    .sort((a, b) => b.timestamp - a.timestamp); // ใหม่สุดขึ้นก่อน
 
-  // ✅ กรองรายวิชา: แสดงเฉพาะของโรงเรียนนักเรียน และ (ตรงระดับชั้น หรือ เป็น ALL)
+  // กรองรายวิชา
   const mySubjects = subjects.filter(s => {
-      // 1. ต้องตรงโรงเรียน (Trim เพื่อความชัวร์)
       const subjectSchool = (s.school || '').trim();
       const studentSchool = (student.school || '').trim();
       if (subjectSchool !== studentSchool) return false;
-
-      // 2. ต้องตรงระดับชั้น หรือ เป็นวิชารวม (ALL)
       return s.grade === 'ALL' || s.grade === student.grade;
   });
 
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString;
     return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
   };
   
-  // Helper for Icons
   const getIcon = (iconName: string, size = 32) => {
       switch(iconName) {
           case 'Book': return <BookOpen size={size} />;
@@ -176,38 +194,51 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div>
             <h2 className="text-2xl font-bold text-gray-800">ประวัติการส่งงาน</h2>
-            <p className="text-gray-500">รายการที่ทำเสร็จแล้ว ({allFinished.length} รายการ)</p>
+            <p className="text-gray-500">ผลการทดสอบทั้งหมด ({myHistory.length} รายการ)</p>
           </div>
         </div>
 
         <div className="space-y-4">
-          {allFinished.length > 0 ? (
-            allFinished.map(hw => {
-              const result = examResults.find(r => r.assignmentId === hw.id);
-              const isOnet = hw.title?.startsWith('[O-NET]');
+          {myHistory.length > 0 ? (
+            myHistory.map(result => {
+              // หา Assignment ต้นฉบับ (ถ้ามี)
+              const assignment = assignments.find(a => String(a.id) === String(result.assignmentId));
+              const title = assignment?.title || (assignment ? assignment.subject : (result.assignmentId ? 'งานที่ถูกลบไปแล้ว' : 'ฝึกฝนทั่วไป'));
+              const isOnet = title.startsWith('[O-NET]');
+              
+              const score = result.score;
+              const total = result.totalQuestions;
+              const percent = total > 0 ? Math.round((score / total) * 100) : 0;
+              
+              let scoreColor = 'text-red-600';
+              if (percent >= 80) scoreColor = 'text-green-600';
+              else if (percent >= 50) scoreColor = 'text-yellow-600';
+
               return (
-                <div key={hw.id} className={`p-5 rounded-2xl shadow-sm border flex flex-col justify-between items-start gap-4 hover:shadow-md transition-shadow ${isOnet ? 'bg-indigo-50 border-indigo-100' : 'bg-white border-gray-100'}`}>
-                   <div className="flex flex-col sm:flex-row justify-between w-full items-start sm:items-center">
+                <div key={result.id} className={`p-5 rounded-2xl shadow-sm border flex flex-col justify-between items-start gap-4 hover:shadow-md transition-shadow ${isOnet ? 'bg-indigo-50 border-indigo-100' : 'bg-white border-gray-100'}`}>
+                   <div className="flex flex-col sm:flex-row justify-between w-full items-start sm:items-center gap-4">
                        <div>
                          <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isOnet ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-50 text-blue-600'}`}>{hw.subject}</span>
-                            <span className="text-xs text-gray-400">{new Date(result?.timestamp || 0).toLocaleString('th-TH')}</span>
+                            <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isOnet ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-50 text-blue-600'}`}>{result.subject}</span>
+                            <span className="text-xs text-gray-400">{new Date(result.timestamp).toLocaleString('th-TH')}</span>
                          </div>
                          <div className="font-bold text-gray-800 text-lg">
-                            {hw.title || hw.subject}
+                            {title}
                          </div>
                        </div>
                        
-                       <div className="flex items-center gap-4 mt-2 sm:mt-0">
+                       <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end bg-white/50 p-2 rounded-xl border border-gray-100 sm:bg-transparent sm:border-0 sm:p-0">
                          <div className="text-right">
-                            <div className="text-xs text-gray-400 font-medium uppercase">คะแนนที่ได้</div>
-                            <div className="text-2xl font-black text-blue-600 leading-none">
-                                {result ? result.score : 0}
-                                <span className="text-sm text-gray-400 font-medium">/{result ? result.totalQuestions : 0}</span>
+                            <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">คะแนนที่ได้</div>
+                            <div className={`text-2xl font-black leading-none flex items-baseline justify-end gap-1 ${scoreColor}`}>
+                                {score}
+                                <span className="text-sm text-gray-400 font-medium">/{total}</span>
                             </div>
                          </div>
-                         <div className="bg-green-100 p-2 rounded-full text-green-600">
-                            <CheckCircle size={24} />
+                         
+                         {/* Percentage Badge */}
+                         <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xs border-4 ${percent >= 80 ? 'border-green-200 bg-green-100 text-green-700' : percent >= 50 ? 'border-yellow-200 bg-yellow-100 text-yellow-700' : 'border-red-200 bg-red-100 text-red-700'}`}>
+                             {percent}%
                          </div>
                        </div>
                    </div>
@@ -281,7 +312,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div className="space-y-4 pt-4 border-t border-gray-200">
                     <h3 className="font-bold text-gray-600 flex items-center gap-2"><CheckCircle size={20} className="text-green-500"/> ข้อสอบที่ทำเสร็จแล้ว</h3>
                     {finishedOnet.map(hw => {
-                        const result = examResults.find(r => r.assignmentId === hw.id);
+                        const result = getLatestResult(hw.id);
                         return (
                             <div key={hw.id} className="bg-gray-50 rounded-2xl p-4 border border-gray-200 flex justify-between items-center">
                                 <div>
@@ -367,6 +398,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* 2. การบ้านทั่วไป (Pending General Assignments) */}
+      {/* Show only if there are actually pending items */}
       {pendingGeneral.length > 0 ? (
         <div className="bg-white border-l-4 border-orange-500 rounded-2xl p-6 shadow-md animate-fade-in">
             <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -375,31 +407,39 @@ const Dashboard: React.FC<DashboardProps> = ({
             </h3>
             <div className="space-y-3">
                 {pendingGeneral.map(hw => {
-                    const isExpired = new Date(hw.deadline) < new Date();
+                    // ตรวจสอบวันหมดเขต
+                    const deadlineDate = new Date(hw.deadline);
+                    const now = new Date();
+                    const isExpired = deadlineDate < now;
+                    
                     return (
                         <div key={hw.id} className={`p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center border gap-3 ${isExpired ? 'bg-red-50 border-red-100' : 'bg-orange-50 border-orange-100'}`}>
-                            <div>
-                                <div className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                            <div className="flex-1">
+                                <div className="font-bold text-gray-800 text-lg flex items-center gap-2 flex-wrap">
                                   {hw.title || hw.subject} 
-                                  {isExpired && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full border border-red-200">เลยกำหนด</span>}
+                                  {isExpired && (
+                                      <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full border border-red-200 flex items-center gap-1">
+                                          <AlertCircle size={10}/> เลยกำหนด
+                                      </span>
+                                  )}
                                 </div>
-                                <div className={`text-sm ${isExpired ? 'text-red-500 font-medium' : 'text-gray-600'}`}>
-                                  {hw.questionCount} ข้อ • ส่งภายใน {formatDate(hw.deadline)}
+                                <div className={`text-sm mt-1 flex items-center gap-2 ${isExpired ? 'text-red-500 font-medium' : 'text-gray-600'}`}>
+                                  <Clock size={14}/> {hw.questionCount} ข้อ • ส่งภายใน {formatDate(hw.deadline)}
                                 </div>
                                 {hw.createdBy && (
                                    <div className="text-xs text-purple-600 mt-1 font-medium bg-purple-50 px-2 py-0.5 rounded w-fit">
-                                      มอบหมายโดย: ครู{hw.createdBy}
+                                      ครู{hw.createdBy}
                                    </div>
                                 )}
                             </div>
                             <button 
                                 onClick={() => onStartAssignment && onStartAssignment(hw)}
-                                className={`w-full sm:w-auto px-6 py-2 rounded-xl font-bold text-sm shadow-md transition-all hover:-translate-y-1 active:scale-95
+                                className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-sm shadow-md transition-all hover:-translate-y-1 active:scale-95 flex items-center justify-center gap-2
                                   ${isExpired 
                                     ? 'bg-red-500 text-white hover:bg-red-600 shadow-red-200' 
                                     : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-200'}`}
                             >
-                                {isExpired ? 'ส่งงานล่าช้า' : 'เริ่มทำ'}
+                                {isExpired ? <><History size={16}/> ทำย้อนหลัง</> : 'เริ่มทำ'}
                             </button>
                         </div>
                     );
@@ -407,9 +447,16 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
         </div>
       ) : (
-        <div className="bg-green-50 border border-green-200 rounded-2xl p-4 flex items-center justify-center gap-2 text-green-700 shadow-sm">
-           <CheckCircle size={20} /> เยี่ยมมาก! คุณส่งงานครบทุกชิ้นแล้ว
-        </div>
+        // Only show "All Done" if we have history but no pending
+        (myHistory.length > 0) && (
+            <div className="bg-green-50 border border-green-200 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 text-green-700 shadow-sm text-center animate-fade-in">
+                <div className="bg-green-100 p-4 rounded-full"><CheckCircle size={32} /></div>
+                <div>
+                    <h4 className="font-bold text-lg">ไม่มีการบ้านค้างแล้ว!</h4>
+                    <p className="text-sm text-green-600">เยี่ยมมาก! คุณทำงานเสร็จครบทุกชิ้นแล้ว</p>
+                </div>
+            </div>
+        )
       )}
 
       {/* 3. วิชาเรียนของคุณ (Your Subjects) */}

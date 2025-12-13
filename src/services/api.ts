@@ -44,8 +44,8 @@ export const teacherLogin = async (username: string, password: string): Promise<
     // ✅ Map snake_case from DB to camelCase for App
     const teacher: Teacher = {
         ...data,
-        gradeLevel: data.grade_level,
-        citizenId: data.citizen_id
+        gradeLevel: data.grade_level || data.gradeLevel, // Robust mapping
+        citizenId: data.citizen_id || data.citizenId
     };
 
     return { success: true, teacher };
@@ -74,11 +74,11 @@ export const verifyStudentLogin = async (code: string): Promise<{student?: Stude
         }
     }
 
-    // Map snake_case back to camelCase if needed, though students table is mostly standard
+    // Map snake_case back to camelCase if needed
     const student: Student = {
         ...data,
-        teacherId: data.teacher_id,
-        quizCount: data.quiz_count
+        teacherId: data.teacher_id || data.teacherId,
+        quizCount: data.quiz_count || data.quizCount
     };
 
     return { student };
@@ -107,25 +107,29 @@ export const getTeacherDashboard = async (school: string) => {
     const { data: results } = await supabase.from('exam_results').select('*').eq('school', school);
     const { data: assignments } = await supabase.from('assignments').select('*').eq('school', school);
 
-    // ✅ Map snake_case to camelCase
+    // ✅ Map snake_case to camelCase Robustly
     const cleanStudents = (students || []).map((s: any) => ({
       ...s,
-      teacherId: s.teacher_id,
-      quizCount: s.quiz_count,
+      teacherId: s.teacher_id || s.teacherId,
+      quizCount: s.quiz_count || s.quizCount,
     }));
 
-    const cleanResults = (results || []).map((r: any) => ({
-      ...r,
-      studentId: r.student_id,
-      studentName: r.student_name,
-      totalQuestions: r.total_questions,
-      assignmentId: r.assignment_id,
-    }));
+    const cleanResults = (results || []).map((r: any) => {
+      // ✅ Handle assignmentId properly (avoid "null" string)
+      const rawAid = r.assignment_id ?? r.assignmentId ?? r.AssignmentId;
+      return {
+        ...r,
+        studentId: r.student_id || r.studentId,
+        studentName: r.student_name || r.studentName,
+        totalQuestions: r.total_questions || r.totalQuestions,
+        assignmentId: (rawAid !== null && rawAid !== undefined && rawAid !== '') ? String(rawAid) : undefined
+      };
+    });
 
     const cleanAssignments = (assignments || []).map((a: any) => ({
       ...a,
-      questionCount: a.question_count,
-      createdBy: a.created_by,
+      questionCount: a.question_count || a.questionCount,
+      createdBy: a.created_by || a.createdBy,
     }));
 
     return { 
@@ -142,7 +146,6 @@ export const getTeacherDashboard = async (school: string) => {
 // Manage Student
 export const manageStudent = async (params: any): Promise<{success: boolean, student?: Student}> => {
     try {
-        // ✅ Map camelCase to snake_case for DB
         const dbPayload: any = {};
         if (params.name !== undefined) dbPayload.name = params.name;
         if (params.school !== undefined) dbPayload.school = params.school;
@@ -150,7 +153,6 @@ export const manageStudent = async (params: any): Promise<{success: boolean, stu
         if (params.grade !== undefined) dbPayload.grade = params.grade;
         if (params.stars !== undefined) dbPayload.stars = params.stars;
         
-        // Mapping specific fields
         if (params.teacherId !== undefined) dbPayload.teacher_id = params.teacherId;
         if (params.quizCount !== undefined) dbPayload.quiz_count = params.quizCount;
         if (params.tokens !== undefined) dbPayload.tokens = params.tokens;
@@ -158,39 +160,26 @@ export const manageStudent = async (params: any): Promise<{success: boolean, stu
         if (params.inventory !== undefined) dbPayload.inventory = params.inventory;
 
         if (params.action === 'add') {
-             // Generate ID if not provided (simple 5 digit)
              const id = Math.floor(10000 + Math.random() * 90000).toString();
              dbPayload.id = id;
              
              const { data, error } = await supabase.from('students').insert([dbPayload]).select().single();
+             if (error) throw error;
              
-             if (error) {
-                 console.error("Add student error:", error);
-                 throw error;
-             }
-             
-             // Map back for frontend use
              const newStudent: Student = {
                  ...data,
                  teacherId: data.teacher_id,
                  quizCount: data.quiz_count
              };
-             
              return { success: true, student: newStudent };
         } else if (params.action === 'edit') {
              const { id } = params;
              const { error } = await supabase.from('students').update(dbPayload).eq('id', id);
-             if (error) {
-                 console.error("Edit student error:", error);
-                 throw error;
-             }
+             if (error) throw error;
              return { success: true };
         } else if (params.action === 'delete') {
              const { error } = await supabase.from('students').delete().eq('id', params.id);
-             if (error) {
-                 console.error("Delete student error:", error);
-                 throw error;
-             }
+             if (error) throw error;
              return { success: true };
         }
     } catch (e: any) {
@@ -202,16 +191,13 @@ export const manageStudent = async (params: any): Promise<{success: boolean, stu
 // Manage Teacher
 export const manageTeacher = async (params: any): Promise<{success: boolean, message?: string}> => {
     try {
-        // ✅ Create mapping payload manually to handle camelCase -> snake_case
         const dbPayload: any = {};
         if (params.name) dbPayload.name = params.name;
         if (params.username) dbPayload.username = params.username;
         if (params.password) dbPayload.password = params.password;
         if (params.school) dbPayload.school = params.school;
         if (params.role) dbPayload.role = params.role;
-        // Fix: Map gradeLevel to grade_level
         if (params.gradeLevel) dbPayload.grade_level = params.gradeLevel;
-        // Fix: Map citizenId to citizen_id
         if (params.citizenId) dbPayload.citizen_id = params.citizenId;
 
         if (params.action === 'add') {
@@ -227,18 +213,16 @@ export const manageTeacher = async (params: any): Promise<{success: boolean, mes
         }
         return { success: true };
     } catch (e: any) {
-        console.error("Manage teacher error:", e);
         return { success: false, message: e.message || e.toString() };
     }
 };
 
 export const getAllTeachers = async (): Promise<Teacher[]> => {
     const { data } = await supabase.from('teachers').select('*');
-    // ✅ Map snake_case to camelCase
     return (data || []).map((t: any) => ({
         ...t,
-        gradeLevel: t.grade_level,
-        citizenId: t.citizen_id
+        gradeLevel: t.grade_level || t.gradeLevel,
+        citizenId: t.citizen_id || t.citizenId
     }));
 }
 
@@ -270,10 +254,9 @@ export const getPendingRegistrations = async () => {
 };
 
 export const approveRegistration = async (req: RegistrationRequest, school: string) => {
-    // Create teacher account
     const { error } = await supabase.from('teachers').insert({
-        username: req.citizenId, // Use Citizen ID as username
-        password: '123456', // Default password
+        username: req.citizenId,
+        password: '123456',
         name: `${req.name} ${req.surname}`,
         school: school,
         role: 'TEACHER',
@@ -319,14 +302,8 @@ export const editQuestion = async (q: any) => {
             { id: '1', text: q.c1 }, { id: '2', text: q.c2 }, { id: '3', text: q.c3 }, { id: '4', text: q.c4 }
         ]),
         correct_choice_id: q.correct,
-        explanation: q.explanation,
-        // Optional: Update teacherId if ownership changes, but usually not needed for edits
-        // teacher_id: q.teacherId 
+        explanation: q.explanation
     }).eq('id', q.id);
-    
-    if (error) {
-        console.error("Edit Question Error:", error);
-    }
     return !error;
 };
 
@@ -339,8 +316,8 @@ export const getQuestionsBySubject = async (subject: string) => {
     return (data || []).map((q: any) => ({
       ...q, id: String(q.id),
       choices: typeof q.choices === 'string' ? JSON.parse(q.choices) : q.choices,
-      correctChoiceId: String(q.correct_choice_id),
-      teacherId: String(q.teacher_id)
+      correctChoiceId: String(q.correct_choice_id || q.correctChoiceId),
+      teacherId: String(q.teacher_id || q.teacherId)
     }));
 };
 
@@ -373,11 +350,10 @@ export const getSubjects = async (school: string) => {
     return (data || []).map((s:any) => ({...s, teacherId: s.teacher_id}));
 };
 
-// ✅ Fix: Return error message and include ID in insert
 export const addSubject = async (school: string, sub: SubjectConfig): Promise<{success: boolean, message?: string}> => {
     try {
         const { error } = await supabase.from('subjects').insert({
-            id: sub.id, // Explicitly send ID as text
+            id: sub.id, 
             name: sub.name, 
             school, 
             teacher_id: sub.teacherId, 
@@ -389,7 +365,6 @@ export const addSubject = async (school: string, sub: SubjectConfig): Promise<{s
         if (error) throw error;
         return { success: true };
     } catch (e: any) {
-        console.error("Add Subject Error:", e);
         return { success: false, message: e.message || e.toString() };
     }
 };
@@ -398,7 +373,6 @@ export const deleteSubject = async (school: string, id: string) => {
     await supabase.from('subjects').delete().eq('id', id);
 };
 
-// ✅ Stats (Real Data)
 export const getAllSchoolStats = async (): Promise<SchoolStats[]> => {
     try {
         const { data: schools } = await supabase.from('schools').select('name, status');
@@ -406,23 +380,12 @@ export const getAllSchoolStats = async (): Promise<SchoolStats[]> => {
         
         if (schools) {
             for (const s of schools) {
-                 // Count students
-                 const { count: studentCount } = await supabase
-                    .from('students')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('school', s.name);
-
-                 // Count activity (exam results)
-                 const { count: activityCount, data: lastActivity } = await supabase
-                    .from('exam_results')
-                    .select('timestamp', { count: 'exact' })
-                    .eq('school', s.name)
-                    .order('timestamp', { ascending: false })
-                    .limit(1);
+                 const { count: studentCount } = await supabase.from('students').select('*', { count: 'exact', head: true }).eq('school', s.name);
+                 const { count: activityCount, data: lastActivity } = await supabase.from('exam_results').select('timestamp', { count: 'exact' }).eq('school', s.name).order('timestamp', { ascending: false }).limit(1);
 
                  stats.push({
                      schoolName: s.name,
-                     loginCount: studentCount || 0,  // Using student count as proxy for potential users
+                     loginCount: studentCount || 0,
                      activityCount: activityCount || 0,
                      lastActive: lastActivity && lastActivity[0] ? lastActivity[0].timestamp : 0
                  });
@@ -430,12 +393,11 @@ export const getAllSchoolStats = async (): Promise<SchoolStats[]> => {
         }
         return stats;
     } catch (e) {
-        console.error("Error fetching school stats:", e);
         return [];
     }
 };
 
-// ✅ บันทึกคะแนนสอบ
+// ✅ บันทึกคะแนนสอบ Robustly
 export const saveScore = async (
     studentId: string, 
     studentName: string, 
@@ -445,77 +407,115 @@ export const saveScore = async (
     subject: string, 
     assignmentId?: string,
     gamificationData?: { quizCount: number, tokens: number, level: number, inventory: string[] }
-) => {
+): Promise<{ success: boolean, error?: any }> => {
   try {
+    // 🟢 Debug: Log what we are saving
+    console.log(`[saveScore] Saving for ${studentName} (ID: ${studentId})`);
+    console.log(`[saveScore] Assignment ID: "${assignmentId}" (Type: ${typeof assignmentId})`);
+
     // 1. Save Result (if not game mode only)
     if (subject !== 'GAME_MODE') {
-        await supabase.from('exam_results').insert([{
+        const payload: any = {
             student_id: studentId,
             student_name: studentName,
             school,
             score,
             total_questions: total,
             subject,
-            assignment_id: assignmentId,
             timestamp: Date.now()
-        }]);
+        };
+        
+        // Ensure assignmentId is added cleanly (snake_case)
+        if (assignmentId && String(assignmentId).trim() !== '') {
+            payload.assignment_id = String(assignmentId).trim();
+        } else {
+            // Explicitly set to null if missing, to be clear
+            payload.assignment_id = null;
+        }
+
+        console.log("[saveScore] Payload:", payload);
+
+        const { error } = await supabase.from('exam_results').insert([payload]);
+        
+        if (error) {
+            console.error("Supabase Save Error:", error);
+            return { success: false, error };
+        }
     }
 
-    // 2. Update Student Stats & Gamification
-    // If gamification data provided, update it
+    // 2. Update Student Stats
     if (gamificationData) {
-        // Also add score to stars
         const { data: s } = await supabase.from('students').select('stars').eq('id', studentId).single();
         const currentStars = s?.stars || 0;
         
-        await supabase.from('students').update({
+        const { error: updateError } = await supabase.from('students').update({
             stars: currentStars + score,
             quiz_count: gamificationData.quizCount,
             tokens: gamificationData.tokens,
             level: gamificationData.level,
             inventory: gamificationData.inventory
         }).eq('id', studentId);
+
+        if (updateError) console.warn("Gamification Update Error:", updateError);
     } else {
-        // Just increment stars
         const { data: s } = await supabase.from('students').select('stars').eq('id', studentId).single();
-        await supabase.from('students').update({ stars: (s?.stars || 0) + score }).eq('id', studentId);
+        const { error: updateError } = await supabase.from('students').update({ stars: (s?.stars || 0) + score }).eq('id', studentId);
+        if (updateError) console.warn("Stars Update Error:", updateError);
     }
     
-    return true;
+    return { success: true };
   } catch (e) {
-    console.error("Save score error", e);
-    return false;
+    console.error("Save score exception:", e);
+    return { success: false, error: e };
   }
 }
 
-// Get Data For Student
+// 🟢 Get Data For Student (Fixed for Missing History)
 export const getDataForStudent = async (student: Student): Promise<{results: ExamResult[], assignments: Assignment[], subjects: SubjectConfig[]}> => {
     try {
         const school = student.school || '';
+        
+        // Fetch SPECIFIC student results, ordered by timestamp DESC
+        // Note: Removing global limit and fetching all for this specific student
+        // or setting a high limit enough for one person.
         const [res, assign, subs] = await Promise.all([
-            supabase.from('exam_results').select('*').eq('student_id', student.id),
-            supabase.from('assignments').select('*').eq('school', school),
-            supabase.from('subjects').select('*').eq('school', school)
+            supabase.from('exam_results')
+                .select('*')
+                .eq('student_id', student.id)
+                .order('timestamp', { ascending: false })
+                .limit(1000), // Get 1000 recent items for this student (much safer than global fetch)
+            
+            supabase.from('assignments')
+                .select('*')
+                .eq('school', school),
+                
+            supabase.from('subjects')
+                .select('*')
+                .eq('school', school)
         ]);
         
-        const cleanResults = (res.data || []).map((r: any) => ({
-            id: r.id,
-            studentId: String(r.student_id),
-            subject: normalizeSubject(r.subject),
-            score: Number(r.score),
-            totalQuestions: Number(r.total_questions),
-            timestamp: Number(r.timestamp),
-            assignmentId: r.assignment_id
-        }));
+        // ✅ Robust Mapping: Handle snake_case and camelCase
+        const cleanResults = (res.data || []).map((r: any) => {
+            const rawAid = r.assignment_id ?? r.assignmentId;
+            return {
+                id: r.id,
+                studentId: String(r.student_id || r.studentId || ''),
+                subject: normalizeSubject(r.subject),
+                score: Number(r.score),
+                totalQuestions: Number(r.total_questions || r.totalQuestions),
+                timestamp: Number(r.timestamp),
+                assignmentId: (rawAid !== null && rawAid !== undefined && rawAid !== '') ? String(rawAid) : undefined
+            };
+        });
 
         const cleanAssignments = (assign.data || []).map((a: any) => ({
             id: String(a.id),
             school: String(a.school),
             subject: normalizeSubject(a.subject),
             grade: a.grade,
-            questionCount: Number(a.question_count),
+            questionCount: Number(a.question_count || a.questionCount),
             deadline: String(a.deadline),
-            createdBy: String(a.created_by),
+            createdBy: String(a.created_by || a.createdBy),
             title: a.title
         }));
         
@@ -525,58 +525,65 @@ export const getDataForStudent = async (student: Student): Promise<{results: Exa
 
         return { results: cleanResults, assignments: cleanAssignments, subjects: cleanSubjects };
     } catch (e) {
+        console.error("getDataForStudent error:", e);
         return { results: [], assignments: [], subjects: [] };
     }
 };
 
+// Global Fetch (Still needed for initial load or legacy)
 export const fetchAppData = async (): Promise<AppData> => {
   try {
     const [studentsRes, questionsRes, resultsRes, assignmentsRes, subjectsRes] = await Promise.all([
       supabase.from('students').select('*'),
       supabase.from('questions').select('*'),
-      supabase.from('exam_results').select('*'),
+      // Limit global fetch to avoid timeouts, students use specific fetch now
+      supabase.from('exam_results').select('*').order('timestamp', { ascending: false }).limit(2000), 
       supabase.from('assignments').select('*'),
       supabase.from('subjects').select('*')
     ]);
 
+    // ✅ Robust Mapping
     const cleanStudents = (studentsRes.data || []).map((s: any) => ({
       ...s, 
       id: String(s.id).trim(), 
       stars: Number(s.stars) || 0,
-      teacherId: s.teacher_id, // Map snake to camel
-      quizCount: s.quiz_count
+      teacherId: s.teacher_id || s.teacherId, 
+      quizCount: s.quiz_count || s.quizCount
     }));
 
     const cleanQuestions = (questionsRes.data || []).map((q: any) => ({
       ...q, id: String(q.id).trim(), subject: normalizeSubject(q.subject),
       choices: typeof q.choices === 'string' ? JSON.parse(q.choices) : q.choices,
-      correctChoiceId: String(q.correct_choice_id),
-      teacherId: String(q.teacher_id)
+      correctChoiceId: String(q.correct_choice_id || q.correctChoiceId),
+      teacherId: String(q.teacher_id || q.teacherId)
     }));
 
-    const cleanResults = (resultsRes.data || []).map((r: any) => ({
-      id: r.id,
-      studentId: String(r.student_id),
-      subject: normalizeSubject(r.subject),
-      score: Number(r.score),
-      totalQuestions: Number(r.total_questions),
-      timestamp: Number(r.timestamp),
-      assignmentId: r.assignment_id
-    }));
+    const cleanResults = (resultsRes.data || []).map((r: any) => {
+        const rawAid = r.assignment_id ?? r.assignmentId ?? r.AssignmentId;
+        return {
+            id: r.id,
+            studentId: String(r.student_id || r.studentId || ''),
+            subject: normalizeSubject(r.subject),
+            score: Number(r.score),
+            totalQuestions: Number(r.total_questions || r.totalQuestions),
+            timestamp: Number(r.timestamp),
+            assignmentId: (rawAid !== null && rawAid !== undefined && rawAid !== '') ? String(rawAid) : undefined
+        };
+    });
 
     const cleanAssignments = (assignmentsRes.data || []).map((a: any) => ({
       id: String(a.id),
       school: String(a.school),
       subject: normalizeSubject(a.subject),
       grade: a.grade,
-      questionCount: Number(a.question_count),
+      questionCount: Number(a.question_count || a.questionCount),
       deadline: String(a.deadline),
-      createdBy: String(a.created_by),
+      createdBy: String(a.created_by || a.createdBy),
       title: a.title
     }));
     
     const cleanSubjects = (subjectsRes.data || []).map((s:any) => ({
-        ...s, teacherId: s.teacher_id
+        ...s, teacherId: s.teacher_id || s.teacherId
     }));
 
     return {
