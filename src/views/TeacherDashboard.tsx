@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Teacher, Student, Assignment, Question, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Gamepad2, Calendar, User, Building, UserCog, MonitorSmartphone, Database, ArrowLeft, Trophy, UploadCloud, RefreshCw, AlertTriangle, ToggleLeft, ToggleRight, Trash2, Edit, PlusCircle, CreditCard, X, GraduationCap, KeyRound, Sparkles, List, CheckCircle, Clock, Wand2, BrainCircuit, Loader2, Save, Copy } from 'lucide-react';
+import { UserPlus, BarChart2, FileText, LogOut, Gamepad2, Calendar, User, Building, UserCog, MonitorSmartphone, Database, ArrowLeft, Trophy, UploadCloud, RefreshCw, AlertTriangle, ToggleLeft, ToggleRight, Trash2, Edit, PlusCircle, CreditCard, X, GraduationCap, KeyRound, Sparkles, List, CheckCircle, Clock, Wand2, BrainCircuit, Loader2, Save, Copy, Search } from 'lucide-react';
 import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration, verifyStudentLogin, getQuestionsBySubject, getAllSchoolStats } from '../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../services/aiService';
 import { supabase } from '../services/firebaseConfig';
@@ -219,6 +220,24 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     setAssignments(data.assignments || []); 
     
     setLoading(false);
+  };
+
+  // ✅ Helper for Admin Stats Modal
+  const getStudentSubjectStats = (studentId: string) => {
+    const studentResults = stats.filter(r => String(r.studentId) === String(studentId));
+    const subjectsMap: any = {};
+    studentResults.forEach(r => {
+        if (!subjectsMap[r.subject]) subjectsMap[r.subject] = { name: r.subject, attempts: 0, totalScore: 0 };
+        const totalQ = Number(r.totalQuestions);
+        const score = Number(r.score) || 0;
+        if (totalQ > 0) subjectsMap[r.subject].totalScore += (score / totalQ) * 100;
+        subjectsMap[r.subject].attempts++;
+    });
+    return Object.values(subjectsMap).map((s:any) => {
+        let avg = s.attempts > 0 ? Math.round(s.totalScore / s.attempts) : 0;
+        if (isNaN(avg) || !isFinite(avg)) avg = 0;
+        return { ...s, average: avg };
+    });
   };
   
   // ✅ UPDATED: Calculate O-NET Stats from REAL DATA
@@ -504,6 +523,67 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                   </div>
               </div>
           </div>
+      )}
+
+      {/* ✅ Student Stats Modal (Added for Admin Stats View) */}
+      {selectedStudentForStats && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col animate-fade-in">
+                <div className="bg-gradient-to-r from-blue-500 to-indigo-600 p-4 text-white flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <span className="text-3xl">{selectedStudentForStats.avatar}</span>
+                        <div>
+                            <h3 className="font-bold text-lg">{selectedStudentForStats.name}</h3>
+                            <p className="text-xs opacity-80">รหัส: {selectedStudentForStats.id} | ระดับ: {GRADE_LABELS[selectedStudentForStats.grade || ''] || selectedStudentForStats.grade}</p>
+                        </div>
+                    </div>
+                    <button onClick={() => setSelectedStudentForStats(null)} className="hover:bg-white/20 p-2 rounded-full transition"><X size={20}/></button>
+                </div>
+                <div className="p-4 overflow-y-auto bg-gray-50 flex-1">
+                    <h4 className="font-bold text-gray-700 mb-2">คะแนนรายวิชา</h4>
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                        {getStudentSubjectStats(selectedStudentForStats.id).map((s: any) => (
+                            <div key={s.name} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center">
+                                <div>
+                                    <div className="text-sm font-bold text-gray-800">{s.name}</div>
+                                    <div className="text-xs text-gray-500">สอบ {s.attempts} ครั้ง</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className={`text-lg font-black ${s.average >= 80 ? 'text-green-600' : s.average >= 50 ? 'text-yellow-600' : 'text-red-500'}`}>{s.average}%</div>
+                                    <div className="text-[10px] text-gray-400">เฉลี่ย</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <h4 className="font-bold text-gray-700 mb-2">ประวัติการสอบล่าสุด</h4>
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-100 text-gray-600"><tr><th className="p-2">วิชา</th><th className="p-2 text-center">คะแนน</th><th className="p-2 text-right">วันที่</th></tr></thead>
+                            <tbody>
+                                {stats
+                                  .filter(r => String(r.studentId) === String(selectedStudentForStats.id))
+                                  .sort((a, b) => b.timestamp - a.timestamp)
+                                  .slice(0, 10)
+                                  .map((r, i) => (
+                                    <tr key={i} className="border-b last:border-0 hover:bg-gray-50">
+                                        <td className="p-2">{r.subject}</td>
+                                        <td className="p-2 text-center"><span className="font-bold">{r.score}</span><span className="text-gray-400">/{r.totalQuestions}</span></td>
+                                        <td className="p-2 text-right text-xs text-gray-500">
+                                          {new Date(r.timestamp).toLocaleDateString('th-TH', { 
+                                              day: 'numeric', 
+                                              month: 'short', 
+                                              year: '2-digit' 
+                                          })}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>,
+        document.body
       )}
 
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6 rounded-b-3xl md:rounded-3xl shadow-lg mb-8 flex justify-between items-center">
@@ -1213,7 +1293,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                                         <td className="p-3 text-center">{overall.attempts} ครั้ง</td>
                                                         <td className="p-3 text-right font-black text-orange-600">{overall.average}%</td>
                                                         <td className="p-3 text-center">
-                                                            <span className="text-xs text-gray-400">ดูในเมนูผลคะแนน</span>
+                                                            <button onClick={() => setSelectedStudentForStats(s)} className="text-blue-600 hover:bg-blue-100 p-2 rounded-lg transition"><Search size={18}/></button>
                                                         </td>
                                                     </tr>
                                                 )

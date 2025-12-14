@@ -42,6 +42,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   
   // State สำหรับเลือก Tab ในหน้าประวัติ (Homework vs Practice)
   const [historyTab, setHistoryTab] = useState<'homework' | 'practice'>('homework');
+  
+  // 🟢 State สำหรับเลือก Tab ในหน้า O-NET
+  const [onetTab, setOnetTab] = useState<'pending' | 'finished'>('pending');
 
   const GRADE_LABELS: Record<string, string> = { 'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3', 'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6', 'M1': 'ม.1', 'M2': 'ม.2', 'M3': 'ม.3', 'ALL': 'ทุกชั้น' };
 
@@ -108,6 +111,22 @@ const Dashboard: React.FC<DashboardProps> = ({
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return dateString;
     return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  // ✅ New Helper for History Timestamp
+  const formatHistoryDateTime = (timestamp: number) => {
+      const date = new Date(timestamp);
+      const datePart = date.toLocaleDateString('th-TH', { 
+          day: 'numeric', 
+          month: 'long', 
+          year: 'numeric' 
+      });
+      const timePart = date.toLocaleTimeString('th-TH', { 
+          hour: '2-digit', 
+          minute: '2-digit', 
+          hour12: false 
+      });
+      return `วันที่ ${datePart} ${timePart} น.`;
   };
   
   const getIcon = (iconName: string, size = 32) => {
@@ -242,7 +261,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                        <div>
                          <div className="flex items-center gap-2 mb-1">
                             <span className={`text-xs font-bold px-2 py-1 rounded-lg ${isOnet ? 'bg-indigo-100 text-indigo-700' : historyTab === 'practice' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>{result.subject}</span>
-                            <span className="text-xs text-gray-400">{new Date(result.timestamp).toLocaleString('th-TH')}</span>
+                            <span className="text-xs text-gray-400">{formatHistoryDateTime(result.timestamp)}</span>
                          </div>
                          <div className="font-bold text-gray-800 text-lg">
                             {title}
@@ -311,55 +330,99 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             </div>
 
-            {/* Pending O-NET */}
-            <div className="space-y-4">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2"><BookOpen size={20} className="text-indigo-600"/> ข้อสอบที่แนะนำ</h3>
-                
-                {pendingOnet.length === 0 ? (
-                    <div className="text-center py-8 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400 text-sm">
-                        ไม่มีข้อสอบใหม่ในขณะนี้
-                    </div>
-                ) : (
-                    pendingOnet.map(hw => (
-                        <div key={hw.id} className="bg-white border-l-4 border-indigo-500 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <div>
-                                <div className="font-bold text-gray-800 text-lg mb-1">{hw.title}</div>
-                                <div className="flex gap-3 text-sm text-gray-500">
-                                    <span className="flex items-center gap-1"><BookOpen size={14}/> {hw.subject}</span>
-                                    <span className="flex items-center gap-1"><Calculator size={14}/> {hw.questionCount} ข้อ</span>
-                                </div>
-                            </div>
-                            <button 
-                                onClick={() => onStartAssignment && onStartAssignment(hw)}
-                                className="w-full md:w-auto bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95"
-                            >
-                                เริ่มทำข้อสอบ
-                            </button>
-                        </div>
-                    ))
-                )}
+            {/* 🟢 O-NET TABS */}
+            <div className="flex bg-gray-100 p-1 rounded-xl mb-4">
+                <button 
+                    onClick={() => setOnetTab('pending')} 
+                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${onetTab === 'pending' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}
+                >
+                    <BookOpen size={16} /> แบบทดสอบ O-NET ({pendingOnet.length})
+                </button>
+                <button 
+                    onClick={() => setOnetTab('finished')} 
+                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${onetTab === 'finished' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}
+                >
+                    <CheckCircle size={16} /> รายการที่ทำเสร็จแล้ว ({finishedOnet.length})
+                </button>
             </div>
 
-            {/* Finished O-NET List */}
-            {finishedOnet.length > 0 && (
-                <div className="space-y-4 pt-4 border-t border-gray-200">
-                    <h3 className="font-bold text-gray-600 flex items-center gap-2"><CheckCircle size={20} className="text-green-500"/> ข้อสอบที่ทำเสร็จแล้ว</h3>
-                    {finishedOnet.map(hw => {
-                        const result = getLatestResult(hw.id);
-                        return (
-                            <div key={hw.id} className="bg-gray-50 rounded-2xl p-4 border border-gray-200 flex justify-between items-center">
-                                <div>
-                                    <div className="font-bold text-gray-700">{hw.title}</div>
-                                    <div className="text-xs text-gray-500 mt-1">คะแนนล่าสุด: <span className="font-bold text-green-600">{result?.score || 0}/{result?.totalQuestions || 0}</span></div>
-                                </div>
-                                <span className="bg-green-100 text-green-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1">
-                                    <CheckCircle size={12}/> เรียบร้อย
-                                </span>
+            {/* Content Based on Tab */}
+            <div className="space-y-4">
+                {onetTab === 'pending' ? (
+                    // 1. Pending O-NET List
+                    <>
+                        <h3 className="font-bold text-gray-800 flex items-center gap-2 hidden"><BookOpen size={20} className="text-indigo-600"/> ข้อสอบที่แนะนำ</h3>
+                        
+                        {pendingOnet.length === 0 ? (
+                            <div className="text-center py-12 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400">
+                                <Trophy size={48} className="mx-auto mb-2 opacity-20"/>
+                                <p>สุดยอด! คุณทำข้อสอบครบหมดแล้ว</p>
+                                <p className="text-xs mt-1">รอคุณครูเพิ่มข้อสอบใหม่นะ</p>
                             </div>
-                        );
-                    })}
-                </div>
-            )}
+                        ) : (
+                            pendingOnet.map(hw => (
+                                <div key={hw.id} className="bg-white border-l-4 border-indigo-500 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                    <div>
+                                        <div className="font-bold text-gray-800 text-lg mb-1">{hw.title}</div>
+                                        <div className="flex gap-3 text-sm text-gray-500">
+                                            <span className="flex items-center gap-1"><BookOpen size={14}/> {hw.subject}</span>
+                                            <span className="flex items-center gap-1"><Calculator size={14}/> {hw.questionCount} ข้อ</span>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => onStartAssignment && onStartAssignment(hw)}
+                                        className="w-full md:w-auto bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95"
+                                    >
+                                        เริ่มทำข้อสอบ
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </>
+                ) : (
+                    // 2. Finished O-NET List
+                    <>
+                        {finishedOnet.length === 0 ? (
+                            <div className="text-center py-12 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400">
+                                <History size={48} className="mx-auto mb-2 opacity-20"/>
+                                <p>ยังไม่มีประวัติการทำข้อสอบ O-NET</p>
+                            </div>
+                        ) : (
+                            finishedOnet.map(hw => {
+                                const result = getLatestResult(hw.id);
+                                const score = result?.score || 0;
+                                const total = result?.totalQuestions || 0;
+                                const percent = total > 0 ? Math.round((score/total)*100) : 0;
+                                
+                                return (
+                                    <div key={hw.id} className="bg-white rounded-2xl p-5 border border-indigo-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                                        <div className="flex-1">
+                                            <div className="font-bold text-indigo-900 text-lg">{hw.title}</div>
+                                            <div className="text-xs text-gray-500 mt-1 flex gap-3">
+                                                <span>{hw.subject}</span>
+                                                <span>•</span>
+                                                <span>ทำเมื่อ: {result ? formatHistoryDateTime(result.timestamp) : '-'}</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end bg-gray-50 p-3 rounded-xl md:bg-transparent md:p-0">
+                                            <div className="text-right">
+                                                <div className="text-[10px] text-gray-400 uppercase font-bold">คะแนน</div>
+                                                <div className={`font-black text-xl ${percent >= 50 ? 'text-green-600' : 'text-orange-500'}`}>
+                                                    {score} <span className="text-sm text-gray-400">/{total}</span>
+                                                </div>
+                                            </div>
+                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-[10px] border-2 ${percent >= 80 ? 'bg-green-100 text-green-700 border-green-200' : percent >= 50 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                                                {percent}%
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </>
+                )}
+            </div>
         </div>
       );
   }

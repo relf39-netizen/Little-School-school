@@ -104,7 +104,14 @@ export const requestRegistration = async (citizenId: string, name: string, surna
 export const getTeacherDashboard = async (school: string) => {
   try {
     const { data: students } = await supabase.from('students').select('*').eq('school', school);
-    const { data: results } = await supabase.from('exam_results').select('*').eq('school', school);
+    
+    // ✅ เพิ่ม Limit เป็น 5000 และเรียงจากล่าสุด เพื่อให้มั่นใจว่าได้ข้อมูลใหม่
+    const { data: results } = await supabase.from('exam_results')
+        .select('*')
+        .eq('school', school)
+        .order('timestamp', { ascending: false })
+        .limit(5000);
+
     const { data: assignments } = await supabase.from('assignments').select('*').eq('school', school);
 
     // ✅ Map snake_case to camelCase Robustly

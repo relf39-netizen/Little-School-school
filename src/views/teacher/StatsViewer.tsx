@@ -24,6 +24,9 @@ const StatsViewer: React.FC<StatsViewerProps> = ({ students, stats, availableSub
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string | null>(null);
   const [selectedStudentForStats, setSelectedStudentForStats] = useState<Student | null>(null);
 
+  // 🟢 REMOVED FILTER: แสดงข้อมูลทั้งหมดตามที่ได้รับมา ไม่กรองวันที่แล้ว
+  // เพื่อรองรับปี 2568 (2025) ตามเวลาของโรงเรียน
+
   React.useEffect(() => {
     if (!canManageAll && myGrades.length === 1) {
         setViewLevel('LIST');
@@ -34,6 +37,8 @@ const StatsViewer: React.FC<StatsViewerProps> = ({ students, stats, availableSub
   const getGradeStats = (grade: string) => {
       const gradeStudents = students.filter(s => s.grade === grade);
       const studentIds = gradeStudents.map(s => s.id);
+      
+      // ใช้ stats โดยตรง (ไม่ผ่านตัวกรอง)
       const gradeResults = stats.filter(r => studentIds.includes(String(r.studentId)));
       
       let totalScorePercent = 0; 
@@ -77,6 +82,7 @@ const StatsViewer: React.FC<StatsViewerProps> = ({ students, stats, availableSub
   };
 
   const getStudentOverallStats = (studentId: string) => {
+    // ใช้ stats โดยตรง
     const studentResults = stats.filter(r => String(r.studentId) === String(studentId));
     const attempts = studentResults.length;
     let average = 0;
@@ -93,6 +99,7 @@ const StatsViewer: React.FC<StatsViewerProps> = ({ students, stats, availableSub
   };
 
   const getStudentSubjectStats = (studentId: string) => {
+    // ใช้ stats โดยตรง
     const studentResults = stats.filter(r => String(r.studentId) === String(studentId));
     const subjectsMap: any = {};
     studentResults.forEach(r => {
@@ -149,11 +156,21 @@ const StatsViewer: React.FC<StatsViewerProps> = ({ students, stats, availableSub
                           <table className="w-full text-sm text-left">
                               <thead className="bg-gray-100 text-gray-600"><tr><th className="p-2">วิชา</th><th className="p-2 text-center">คะแนน</th><th className="p-2 text-right">วันที่</th></tr></thead>
                               <tbody>
-                                  {stats.filter(r => String(r.studentId) === String(selectedStudentForStats.id)).slice().reverse().slice(0, 10).map((r, i) => (
+                                  {stats
+                                    .filter(r => String(r.studentId) === String(selectedStudentForStats.id))
+                                    .sort((a, b) => b.timestamp - a.timestamp)
+                                    .slice(0, 10)
+                                    .map((r, i) => (
                                       <tr key={i} className="border-b last:border-0 hover:bg-gray-50">
                                           <td className="p-2">{r.subject}</td>
                                           <td className="p-2 text-center"><span className="font-bold">{r.score}</span><span className="text-gray-400">/{r.totalQuestions}</span></td>
-                                          <td className="p-2 text-right text-xs text-gray-500">{new Date(r.timestamp).toLocaleDateString()}</td>
+                                          <td className="p-2 text-right text-xs text-gray-500">
+                                            {new Date(r.timestamp).toLocaleDateString('th-TH', { 
+                                                day: 'numeric', 
+                                                month: 'short', 
+                                                year: '2-digit' 
+                                            })}
+                                          </td>
                                       </tr>
                                   ))}
                               </tbody>
