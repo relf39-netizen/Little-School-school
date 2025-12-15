@@ -24,7 +24,7 @@ const GRADE_LABELS: Record<string, string> = {
 
 const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subjects, students, stats, teacher, canManageAll, myGrades, onRefresh }) => {
   const [assignStep, setAssignStep] = useState<1 | 2>(1);
-  const [creationMode, setCreationMode] = useState<'AI' | 'EXCEL'>('AI'); // 🟢 Added Mode Selection
+  const [creationMode, setCreationMode] = useState<'AI' | 'EXCEL'>('AI');
   
   const [assignTitle, setAssignTitle] = useState('');
   const [assignSubject, setAssignSubject] = useState<string>('');
