@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Question, SubjectConfig, Teacher } from '../../types';
-import { FileText, Wand2, CheckCircle, UserCog, Edit, Trash2, ChevronLeft, ChevronRight, Book, Loader2, Key, RefreshCw, Save, PlusCircle, X } from 'lucide-react';
+import { FileText, Wand2, CheckCircle, UserCog, Edit, Trash2, ChevronLeft, ChevronRight, Book, Loader2, Key, RefreshCw, Save, PlusCircle, X, Upload, FileSpreadsheet, Download } from 'lucide-react';
 import { addQuestion, editQuestion, deleteQuestion, getQuestionsBySubject } from '../../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../../services/aiService';
 
@@ -25,7 +25,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ subjects, teacher, canManag
   const [qBankSubject, setQBankSubject] = useState<string | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
-  const [showMyQuestionsOnly, setShowMyQuestionsOnly] = useState(false); // Default to false to see all questions first if wanted
+  const [showMyQuestionsOnly, setShowMyQuestionsOnly] = useState(false); 
   const [qBankPage, setQBankPage] = useState(1);
   
   // Form State
@@ -44,6 +44,11 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ subjects, teacher, canManag
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [aiPreviewQuestions, setAiPreviewQuestions] = useState<GeneratedQuestion[]>([]);
+
+  // Excel Import State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importData, setImportData] = useState<any[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
       const savedKey = localStorage.getItem('gemini_api_key');
@@ -125,6 +130,7 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ subjects, teacher, canManag
       document.getElementById('question-form')?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // --- AI Logic ---
   const handleAiGenerate = async () => {
       if (!aiTopic || !geminiApiKey) return alert("กรุณาระบุหัวข้อและ API Key");
       setIsGeneratingAi(true);
@@ -152,6 +158,78 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ subjects, teacher, canManag
       if (qBankSubject === qSubject) loadQuestions();
   };
 
+  // --- Excel Import Logic (Updated to use window.XLSX) ---
+  const handleDownloadTemplate = () => {
+      const XLSX = (window as any).XLSX;
+      if (!XLSX) return alert("กำลังโหลดระบบ Excel... กรุณาลองใหม่ในสักครู่");
+
+      const ws = XLSX.utils.json_to_sheet([
+          { 
+              Subject: "คณิตศาสตร์", 
+              Grade: "P6", 
+              Question: "1 + 1 เท่ากับเท่าไหร่?", 
+              A: "1", B: "2", C: "3", D: "4", 
+              Correct: "2", 
+              Explanation: "เพราะ 1 เพิ่มขึ้นอีก 1 เป็น 2" 
+          }
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Questions");
+      XLSX.writeFile(wb, "Question_Template.xlsx");
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const XLSX = (window as any).XLSX;
+      if (!XLSX) return alert("กำลังโหลดระบบ Excel... กรุณาลองใหม่ในสักครู่");
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+          const bstr = evt.target?.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const data = XLSX.utils.sheet_to_json(ws);
+          setImportData(data);
+      };
+      reader.readAsBinaryString(file);
+  };
+
+  const handleSaveImported = async () => {
+      if (importData.length === 0) return;
+      setIsProcessing(true);
+      const tid = normalizeId(teacher.id);
+      let count = 0;
+      
+      for (const row of importData) {
+          // Validate required fields
+          if (row.Question && row.A && row.B && row.Correct) {
+              await addQuestion({
+                  subject: row.Subject || qSubject || 'ทั่วไป',
+                  grade: row.Grade || qGrade || 'P6',
+                  text: row.Question,
+                  image: '',
+                  c1: String(row.A),
+                  c2: String(row.B),
+                  c3: String(row.C || ''),
+                  c4: String(row.D || ''),
+                  correct: String(row.Correct),
+                  explanation: row.Explanation || '',
+                  school: teacher.school,
+                  teacherId: tid
+              });
+              count++;
+          }
+      }
+      setIsProcessing(false);
+      alert(`✅ นำเข้าสำเร็จ ${count} ข้อ`);
+      setImportData([]);
+      setShowImportModal(false);
+      if (qBankSubject) loadQuestions();
+  };
+
   const getFilteredQuestions = () => { 
       const currentTid = normalizeId(teacher.id);
       let result = questions;
@@ -173,11 +251,73 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ subjects, teacher, canManag
                 <button onClick={() => { setShowAiModal(true); setAiPreviewQuestions([]); }} className="bg-gradient-to-r from-purple-500 to-indigo-500 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition flex items-center gap-2">
                     <Wand2 size={16}/> AI สร้างข้อสอบ
                 </button>
+                <button onClick={() => { setShowImportModal(true); setImportData([]); }} className="bg-green-600 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-md hover:bg-green-700 transition flex items-center gap-2">
+                    <FileSpreadsheet size={16}/> นำเข้า Excel
+                </button>
                 <button onClick={() => { setShowMyQuestionsOnly(!showMyQuestionsOnly); setQBankPage(1); }} className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition ${showMyQuestionsOnly ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border'}`}>
                     {showMyQuestionsOnly ? <CheckCircle size={16}/> : <UserCog size={16}/>} ของฉัน
                 </button>
             </div>
         </div>
+
+        {/* IMPORT EXCEL MODAL */}
+        {showImportModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fade-in">
+                    <div className="p-6 border-b flex justify-between items-center bg-green-600 text-white rounded-t-2xl">
+                        <h3 className="font-bold text-lg flex items-center gap-2"><FileSpreadsheet size={20}/> นำเข้าข้อสอบจาก Excel</h3>
+                        <button onClick={() => setShowImportModal(false)} className="hover:bg-white/20 p-1 rounded"><X size={20}/></button>
+                    </div>
+                    <div className="p-6 space-y-4">
+                        <div className="text-sm text-gray-600">
+                            1. ดาวน์โหลดไฟล์ Template เพื่อดูรูปแบบคอลัมน์
+                        </div>
+                        <button onClick={handleDownloadTemplate} className="flex items-center gap-2 text-green-600 font-bold border border-green-200 bg-green-50 px-4 py-2 rounded-lg hover:bg-green-100 transition w-full justify-center">
+                            <Download size={18}/> ดาวน์โหลด Template.xlsx
+                        </button>
+                        
+                        <div className="text-sm text-gray-600 mt-4">
+                            2. อัปโหลดไฟล์ Excel ที่กรอกข้อมูลแล้ว
+                        </div>
+                        <div 
+                            onClick={() => fileInputRef.current?.click()}
+                            className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center bg-gray-50 hover:bg-white transition relative cursor-pointer"
+                        >
+                            <input 
+                                type="file" 
+                                accept=".xlsx, .xls"
+                                ref={fileInputRef}
+                                onChange={handleFileUpload}
+                                className="hidden"
+                            />
+                            <Upload size={32} className="mx-auto text-gray-400 mb-2"/>
+                            <p className="text-gray-500 text-sm">คลิกเพื่อเลือกไฟล์ Excel</p>
+                        </div>
+
+                        {importData.length > 0 && (
+                            <div className="mt-4">
+                                <div className="text-sm font-bold text-green-700 mb-2">พบข้อมูล {importData.length} ข้อ</div>
+                                <div className="max-h-40 overflow-y-auto bg-gray-50 p-2 rounded border text-xs">
+                                    {importData.slice(0, 5).map((row, i) => (
+                                        <div key={i} className="border-b last:border-0 p-1 truncate">
+                                            {i+1}. {row.Question} (ตอบ: {row.Correct})
+                                        </div>
+                                    ))}
+                                    {importData.length > 5 && <div className="p-1 text-gray-400">...และอีก {importData.length - 5} ข้อ</div>}
+                                </div>
+                                <button 
+                                    onClick={handleSaveImported} 
+                                    disabled={isProcessing}
+                                    className="w-full bg-green-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-green-700 mt-4 disabled:opacity-50 flex justify-center items-center gap-2"
+                                >
+                                    {isProcessing ? 'กำลังบันทึก...' : <><Save size={18}/> ยืนยันการนำเข้า</>}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
 
         {/* AI Modal */}
         {showAiModal && (
@@ -351,7 +491,6 @@ const QuestionBank: React.FC<QuestionBankProps> = ({ subjects, teacher, canManag
                                 )}
                             </div>
                             
-                            {/* ✅ Updated Condition: Owner OR Admin OR Legacy (No Owner) */}
                             {(canManageAll || normalizeId(q.teacherId) === normalizeId(teacher.id) || !q.teacherId) && (
                                 <div className="flex gap-1 ml-4 flex-shrink-0 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button onClick={()=>handleEditQuestion(q)} className="p-2 text-blue-500 hover:bg-blue-100 rounded-lg transition" title="แก้ไข"><Edit size={18}/></button>

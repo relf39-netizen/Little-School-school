@@ -1,8 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Assignment, Question, SubjectConfig, Teacher, Student, ExamResult } from '../../types';
-import { Calendar, ArrowRight, RefreshCw, BrainCircuit, Save, RotateCcw, Eye, Trash2, Loader2, CheckCircle, Clock, X, FileText } from 'lucide-react';
+import { Calendar, ArrowRight, RefreshCw, BrainCircuit, Save, RotateCcw, Eye, Trash2, Loader2, CheckCircle, Clock, X, FileText, FileSpreadsheet, Upload, Download } from 'lucide-react';
 import { addAssignment, deleteAssignment, addQuestion, getQuestionsBySubject } from '../../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../../services/aiService';
 
@@ -24,6 +24,8 @@ const GRADE_LABELS: Record<string, string> = {
 
 const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subjects, students, stats, teacher, canManageAll, myGrades, onRefresh }) => {
   const [assignStep, setAssignStep] = useState<1 | 2>(1);
+  const [creationMode, setCreationMode] = useState<'AI' | 'EXCEL'>('AI'); // 🟢 Added Mode Selection
+  
   const [assignTitle, setAssignTitle] = useState('');
   const [assignSubject, setAssignSubject] = useState<string>('');
   const [assignGrade, setAssignGrade] = useState<string>(canManageAll ? 'ALL' : (myGrades[0] || 'P6')); 
@@ -41,6 +43,9 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
   const [previewQuestions, setPreviewQuestions] = useState<Question[]>([]);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
+  // Excel Refs
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   React.useEffect(() => {
       if (subjects.length > 0 && !assignSubject) {
           setAssignSubject(subjects[0].name);
@@ -49,6 +54,7 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
 
   const normalizeId = (id: any) => String(id || '').trim();
 
+  // --- AI Logic ---
   const handleAssignGenerateQuestions = async () => {
       if (!geminiApiKey) return alert("กรุณาใส่ API Key");
       if (!assignAiTopic) return alert("กรุณาระบุหัวข้อ");
@@ -63,8 +69,76 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
       }
   };
 
+  // --- Excel Logic ---
+  const handleDownloadTemplate = () => {
+      const XLSX = (window as any).XLSX;
+      if (!XLSX) return alert("ระบบ Excel กำลังโหลด กรุณาลองใหม่ในสักครู่");
+
+      const ws = XLSX.utils.json_to_sheet([
+          { 
+              Question: "1 + 1 เท่ากับเท่าไหร่?", 
+              A: "1", B: "2", C: "3", D: "4", 
+              Correct: "2", 
+              Explanation: "เพราะ 1 เพิ่มขึ้นอีก 1 เป็น 2" 
+          },
+          { 
+              Question: "คำถามข้อที่ 2...", 
+              A: "ตัวเลือก ก", B: "ตัวเลือก ข", C: "ตัวเลือก ค", D: "ตัวเลือก ง", 
+              Correct: "1", 
+              Explanation: "คำอธิบายเฉลย..." 
+          }
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Questions");
+      XLSX.writeFile(wb, "Assignment_Template.xlsx");
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const XLSX = (window as any).XLSX;
+      if (!XLSX) return alert("ระบบ Excel กำลังโหลด กรุณาลองใหม่ในสักครู่");
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+          const bstr = evt.target?.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const data = XLSX.utils.sheet_to_json(ws);
+          
+          if (data && data.length > 0) {
+              const importedQs: GeneratedQuestion[] = [];
+              data.forEach((row: any) => {
+                  if (row.Question && row.A && row.B && row.Correct) {
+                      importedQs.push({
+                          text: row.Question,
+                          c1: String(row.A),
+                          c2: String(row.B),
+                          c3: String(row.C || ''),
+                          c4: String(row.D || ''),
+                          correct: String(row.Correct),
+                          explanation: row.Explanation || '',
+                          image: ''
+                      });
+                  }
+              });
+              setNewlyGeneratedQuestions(prev => [...prev, ...importedQs]);
+              alert(`✅ นำเข้าข้อสอบเพิ่ม ${importedQs.length} ข้อ`);
+          }
+      };
+      reader.readAsBinaryString(file);
+      // Reset file input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleFinalizeAssignment = async () => {
       setIsProcessing(true);
+      // 1. Save Questions to Bank First (Assignment uses questions from bank or linked)
+      // Note: In this system design, assignments are linked to questions.
+      // We will save these new questions to the database first.
+      
       if (newlyGeneratedQuestions.length > 0) {
           const tid = normalizeId(teacher.id);
           for (const q of newlyGeneratedQuestions) {
@@ -85,8 +159,11 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
       let finalTitle = assignTitle;
       if (!finalTitle) finalTitle = `การบ้าน ${assignSubject}`;
       
+      // Update count to match actual questions if generated/imported
+      const finalCount = newlyGeneratedQuestions.length > 0 ? newlyGeneratedQuestions.length : assignCount;
+
       const success = await addAssignment(
-          teacher.school, assignSubject, assignGrade, assignCount, assignDeadline, teacher.name, finalTitle
+          teacher.school, assignSubject, assignGrade, finalCount, assignDeadline, teacher.name, finalTitle
       );
       
       setIsProcessing(false);
@@ -108,15 +185,12 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
       date.setDate(date.getDate() + 3);
       const newDeadline = date.toISOString().split('T')[0];
       
-      // Smart Title Logic: Avoid stacking "(Revise) (Revise)"
+      // Smart Title Logic
       let baseTitle = original.title || original.subject;
-      
-      // Check if it already has a "Round X" or date suffix to clean it up or append
       const suffixRegex = /\(รอบเพิ่มเติม.*?\)/;
       let newTitle = baseTitle;
       
       if (suffixRegex.test(baseTitle)) {
-          // If already has suffix, replace it or append date to distinguish
           const today = new Date().toLocaleDateString('th-TH', {day: 'numeric', month: 'numeric'});
           newTitle = `${baseTitle.replace(suffixRegex, '').trim()} (รอบเพิ่มเติม ${today})`;
       } else {
@@ -135,7 +209,7 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
       
       setIsProcessing(false);
       if(success) {
-          alert('✅ มอบหมายงานซ้ำเรียบร้อยแล้ว\nนักเรียนจะเห็นงานชิ้นใหม่ที่หน้าแดชบอร์ดทันที');
+          alert('✅ มอบหมายงานซ้ำเรียบร้อยแล้ว');
           onRefresh();
       } else {
           alert('เกิดข้อผิดพลาด');
@@ -197,7 +271,7 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
                                 </select>
                             </div>
                             <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">จำนวนข้อ</label>
+                                <label className="text-xs font-bold text-gray-500 block mb-1">จำนวนข้อ (โดยประมาณ)</label>
                                 <input type="number" value={assignCount} onChange={(e) => setAssignCount(Number(e.target.value))} className="w-full p-2.5 rounded-lg border border-gray-300 bg-white" min="5" max="50" />
                             </div>
                             <div>
@@ -213,58 +287,114 @@ const AssignmentManager: React.FC<AssignmentManagerProps> = ({ assignments, subj
                                 }}
                                 className="bg-orange-500 text-white px-6 py-2 rounded-xl font-bold hover:bg-orange-600 shadow-sm flex items-center gap-2"
                             >
-                                ถัดไป: สร้างข้อสอบด้วย AI <ArrowRight size={18}/>
+                                ถัดไป: เพิ่มข้อสอบ <ArrowRight size={18}/>
                             </button>
                         </div>
                     </div>
                 )}
                 {assignStep === 2 && (
                     <div className="animate-fade-in space-y-4">
-                        <div className="bg-orange-100 p-4 rounded-xl border border-orange-200 text-orange-900 text-sm mb-4 flex justify-between items-center">
-                            <span>สร้างข้อสอบสำหรับ: <b>{assignSubject}</b> ({assignCount} ข้อ)</span>
+                        <div className="bg-orange-100 p-4 rounded-xl border border-orange-200 text-orange-900 text-sm mb-2 flex justify-between items-center">
+                            <span>สร้างข้อสอบสำหรับ: <b>{assignSubject}</b> (ชั้น {GRADE_LABELS[assignGrade] || assignGrade})</span>
                             <button onClick={() => setAssignStep(1)} className="text-orange-700 underline text-xs">แก้ไขข้อมูล</button>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-1">Google Gemini API Key</label>
-                            <div className="flex gap-2">
-                                <input type="password" value={geminiApiKey} onChange={(e) => { setGeminiApiKey(e.target.value); localStorage.setItem('gemini_api_key', e.target.value); }} className="flex-1 p-2 border rounded-lg text-sm bg-white" placeholder="วาง API Key ที่นี่..." />
-                            </div>
+                        {/* 🟢 Mode Selection Tabs */}
+                        <div className="flex bg-white rounded-xl p-1 border shadow-sm">
+                            <button 
+                                onClick={() => setCreationMode('AI')} 
+                                className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition ${creationMode === 'AI' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-50'}`}
+                            >
+                                <BrainCircuit size={16}/> ใช้ AI สร้างข้อสอบ
+                            </button>
+                            <button 
+                                onClick={() => setCreationMode('EXCEL')} 
+                                className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition ${creationMode === 'EXCEL' ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-50'}`}
+                            >
+                                <FileSpreadsheet size={16}/> นำเข้าจาก Excel
+                            </button>
                         </div>
 
-                        <div className="p-4 bg-white border rounded-xl shadow-sm">
-                            <label className="block text-sm font-bold text-gray-700 mb-2">หัวข้อเรื่องที่ต้องการ (Topic)</label>
-                            <div className="flex gap-2 mb-2">
-                                <input 
-                                    type="text" 
-                                    value={assignAiTopic} 
-                                    onChange={(e) => setAssignAiTopic(e.target.value)} 
-                                    placeholder="ระบุเรื่องที่ต้องการให้ AI สร้างโจทย์ เช่น การบวกเลข, คำราชาศัพท์"
-                                    className="flex-1 p-3 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-200 outline-none"
-                                />
-                                <button 
-                                    onClick={handleAssignGenerateQuestions}
-                                    disabled={isGeneratingAi || !assignAiTopic}
-                                    className="bg-purple-600 text-white px-4 rounded-xl font-bold shadow-sm hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+                        {/* MODE: AI */}
+                        {creationMode === 'AI' && (
+                            <div className="p-4 bg-white border rounded-xl shadow-sm animate-fade-in">
+                                <div className="mb-4">
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Google Gemini API Key</label>
+                                    <div className="flex gap-2">
+                                        <input type="password" value={geminiApiKey} onChange={(e) => { setGeminiApiKey(e.target.value); localStorage.setItem('gemini_api_key', e.target.value); }} className="flex-1 p-2 border rounded-lg text-sm bg-gray-50" placeholder="วาง API Key ที่นี่..." />
+                                    </div>
+                                </div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">หัวข้อเรื่องที่ต้องการ (Topic)</label>
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="text" 
+                                        value={assignAiTopic} 
+                                        onChange={(e) => setAssignAiTopic(e.target.value)} 
+                                        placeholder="เช่น การบวกเลข, คำราชาศัพท์"
+                                        className="flex-1 p-3 border rounded-xl bg-white focus:ring-2 focus:ring-purple-200 outline-none"
+                                    />
+                                    <button 
+                                        onClick={handleAssignGenerateQuestions}
+                                        disabled={isGeneratingAi || !assignAiTopic}
+                                        className="bg-purple-600 text-white px-4 rounded-xl font-bold shadow-sm hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {isGeneratingAi ? <RefreshCw className="animate-spin" size={18}/> : <BrainCircuit size={18}/>}
+                                        สร้าง +5 ข้อ
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* MODE: EXCEL */}
+                        {creationMode === 'EXCEL' && (
+                            <div className="p-6 bg-white border rounded-xl shadow-sm animate-fade-in text-center">
+                                <p className="text-sm text-gray-500 mb-4">ดาวน์โหลด Template และกรอกข้อมูลข้อสอบ จากนั้นอัปโหลดไฟล์กลับเข้ามา</p>
+                                <div className="flex gap-4 justify-center mb-6">
+                                    <button onClick={handleDownloadTemplate} className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-bold hover:bg-gray-200 transition">
+                                        <Download size={18}/> ดาวน์โหลด Template
+                                    </button>
+                                </div>
+                                
+                                <div 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="border-2 border-dashed border-gray-300 rounded-xl p-8 bg-gray-50 hover:bg-white transition relative cursor-pointer group"
                                 >
-                                    {isGeneratingAi ? <RefreshCw className="animate-spin" size={18}/> : <BrainCircuit size={18}/>}
-                                    สร้าง +5 ข้อ
-                                </button>
+                                    <input 
+                                        type="file" 
+                                        accept=".xlsx, .xls"
+                                        ref={fileInputRef}
+                                        onChange={handleFileUpload}
+                                        className="hidden" 
+                                    />
+                                    <div className="flex flex-col items-center">
+                                        <div className="bg-green-100 p-4 rounded-full mb-3 group-hover:scale-110 transition text-green-600">
+                                            <Upload size={32}/>
+                                        </div>
+                                        <p className="font-bold text-gray-700">คลิกเพื่ออัปโหลดไฟล์ Excel</p>
+                                        <p className="text-xs text-gray-400 mt-1">รองรับไฟล์ .xlsx</p>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
-                        <div className="border rounded-xl overflow-hidden bg-white">
+                        {/* Questions List */}
+                        <div className="border rounded-xl overflow-hidden bg-white mt-4">
                             <div className="bg-gray-100 p-3 flex justify-between items-center">
-                                <span className="font-bold text-gray-700 text-sm">รายการข้อสอบ ({newlyGeneratedQuestions.length}/{assignCount})</span>
+                                <span className="font-bold text-gray-700 text-sm">รายการข้อสอบที่จะเพิ่ม ({newlyGeneratedQuestions.length} ข้อ)</span>
                                 {newlyGeneratedQuestions.length > 0 && <button onClick={() => setNewlyGeneratedQuestions([])} className="text-xs text-red-500 hover:underline">ล้างทั้งหมด</button>}
                             </div>
                             <div className="max-h-60 overflow-y-auto p-2 space-y-2">
-                                {newlyGeneratedQuestions.map((q, i) => (
-                                    <div key={i} className="p-3 border rounded-lg bg-gray-50 text-sm relative group">
-                                        <div className="font-bold text-gray-800 pr-6">{i+1}. {q.text}</div>
-                                        <div className="text-gray-500 text-xs mt-1">ตอบ: {q.correct}</div>
-                                    </div>
-                                ))}
+                                {newlyGeneratedQuestions.length === 0 ? (
+                                    <div className="text-center py-8 text-gray-400 text-sm">ยังไม่มีข้อสอบที่เพิ่มเข้ามา</div>
+                                ) : (
+                                    newlyGeneratedQuestions.map((q, i) => (
+                                        <div key={i} className="p-3 border rounded-lg bg-gray-50 text-sm relative group">
+                                            <div className="font-bold text-gray-800 pr-6">{i+1}. {q.text}</div>
+                                            <div className="text-gray-500 text-xs mt-1">ตอบ: {q.correct}</div>
+                                            <button onClick={() => setNewlyGeneratedQuestions(prev => prev.filter((_, idx) => idx !== i))} className="absolute top-2 right-2 text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16}/></button>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         </div>
                         
