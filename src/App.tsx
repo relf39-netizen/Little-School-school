@@ -11,6 +11,7 @@ import GameMode from './views/GameMode';
 import GameSetup from './views/GameSetup';
 import Results from './views/Results';
 import Stats from './views/Stats';
+import RewardShop from './views/RewardShop'; // ✅ Import
 import { Student, Question, Teacher, Subject, ExamResult, Assignment, SubjectConfig } from './types';
 import { fetchAppData, saveScore, getDataForStudent } from './services/api';
 import { Loader2 } from 'lucide-react';
@@ -41,7 +42,7 @@ const App: React.FC = () => {
   const currentAssignmentRef = useRef<Assignment | null>(null);
 
   const [isMusicOn, setIsMusicOn] = useState(true);
-  const [lastScore, setLastScore] = useState<{score: number, total: number, reward?: string, levelUp?: boolean, effort?: boolean, perfect?: boolean} | null>(null);
+  const [lastScore, setLastScore] = useState<{score: number, total: number, reward?: string, levelUp?: boolean, effort?: boolean, perfect?: boolean, earnedStars?: number} | null>(null);
   
   // Data State
   const [students, setStudents] = useState<Student[]>([]);
@@ -95,7 +96,6 @@ const App: React.FC = () => {
       setCurrentUser(student);
       
       // 🟢 Force fetch student specific data immediately upon login
-      // This solves the issue where global fetchAppData might miss recent records due to pagination
       try {
           const specificData = await getDataForStudent(student);
           setExamResults(specificData.results);
@@ -120,14 +120,13 @@ const App: React.FC = () => {
     let levelUp = false;
     let reward: string | undefined = undefined;
 
-    // Use returned ID first (most reliable), then ref, then fallback to undefined
     const activeAssignmentId = returnedAssignmentId || currentAssignmentRef.current?.id;
     
-    // Find subject: try to find assignment by ID to get subject, or fallback
     const matchedAssignment = assignments.find(a => a.id === activeAssignmentId);
     const subjectToSave = matchedAssignment ? matchedAssignment.subject : (selectedSubject || 'รวมวิชา');
-
-    console.log("Saving Score:", { score, total, subjectToSave, activeAssignmentId });
+    
+    // Check if it is an O-NET assignment
+    const isOnet = matchedAssignment?.title?.startsWith('[O-NET]');
 
     // 1. Optimistic Update (Show result immediately)
     const newResult: ExamResult = {
@@ -149,28 +148,36 @@ const App: React.FC = () => {
         if (isPerfect) earnedPerfectToken = true;
 
         let starsToAdd = 0;
-        if (earnedEffortToken) starsToAdd++;
-        if (earnedPerfectToken) starsToAdd++;
 
-        let currentTokens = currentUser.tokens || 0;
+        if (isOnet) {
+            // 🟢 Updated O-NET Star Logic
+            const percent = total > 0 ? score / total : 0;
+            if (score === total) {
+                starsToAdd = 3;
+            } else if (percent >= 0.7) {
+                starsToAdd = 2;
+            } else if (percent >= 0.5) {
+                starsToAdd = 1;
+            } else {
+                starsToAdd = 0; // Less than 50% gets 0
+            }
+        } else {
+            // Normal Logic
+            starsToAdd = score; // 1 score = 1 star
+            if (earnedEffortToken) starsToAdd += 5; // Bonus for streak
+            if (earnedPerfectToken) starsToAdd += 5; // Bonus for perfect
+        }
+
         let currentLevel = currentUser.level || 1;
         let currentInventory = currentUser.inventory || [];
 
-        currentTokens += starsToAdd;
-
-        if (currentTokens >= 5) {
-            levelUp = true;
-            currentLevel++;
-            currentTokens = currentTokens - 5;
-            reward = getRandomReward();
-            currentInventory = [...currentInventory, reward];
-        }
+        // Level up logic (every 50 stars gained total?) - Keeping simple for now based on prompt req
+        // Just accumulate stars for the shop
 
         const updatedUser = {
             ...currentUser,
-            stars: currentUser.stars + score,
+            stars: currentUser.stars + starsToAdd,
             quizCount: newQuizCount,
-            tokens: currentTokens,
             level: currentLevel,
             inventory: currentInventory
         };
@@ -184,10 +191,10 @@ const App: React.FC = () => {
             score, 
             total,
             subjectToSave,
-            activeAssignmentId, // ✅ Send strictly ensured ID
+            activeAssignmentId,
             {
                 quizCount: newQuizCount,
-                tokens: currentTokens,
+                tokens: 0, // Deprecated in favor of direct stars
                 level: currentLevel,
                 inventory: currentInventory
             }
@@ -197,18 +204,19 @@ const App: React.FC = () => {
             alert("❌ บันทึกคะแนนไม่สำเร็จ! กรุณาแจ้งครู\n\nError: " + JSON.stringify(saveResult.error));
         } else {
             console.log("✅ Save confirmed by backend.");
-            // 🟢 Show explicit success message to user if it's homework
-            if (activeAssignmentId) {
-                alert(`✅ บันทึกผลการบ้านเรียบร้อยแล้ว!\n(Assignment ID: ${activeAssignmentId})`);
+            // 🔴 Removed the specific alert for O-NET here
+            if (activeAssignmentId && !isOnet) {
+               alert(`✅ บันทึกผลการบ้านเรียบร้อยแล้ว!`);
+            } else if (activeAssignmentId && isOnet) {
+               // No alert, logic moved to Results screen
             }
-            // Force refresh to get data from server to verify ID persistence
             refreshStudentData();
         }
+        
+        setLastScore({ score, total, perfect: isPerfect, effort: earnedEffortToken, levelUp, reward, earnedStars: starsToAdd });
+        setCurrentPage('results');
+        setCurrentAssignment(null); 
     }
-
-    setLastScore({ score, total, perfect: isPerfect, effort: earnedEffortToken, levelUp, reward });
-    setCurrentPage('results');
-    setCurrentAssignment(null); 
   };
 
   // ... View Handlers ...
@@ -259,7 +267,6 @@ const App: React.FC = () => {
             if (currentAssignment && currentAssignment.questionCount < qList.length) {
                 qList = qList.slice(0, currentAssignment.questionCount);
             }
-            // 🟢 Pass currentAssignment.id explicitly
             return <PracticeMode 
                 questions={qList} 
                 onFinish={handleFinishExam} 
@@ -279,10 +286,14 @@ const App: React.FC = () => {
               earnedPerfectToken={lastScore?.perfect}
               unlockedReward={lastScore?.reward}
               leveledUp={lastScore?.levelUp}
+              earnedStars={lastScore?.earnedStars} 
           />;
           
           case 'stats': return <Stats examResults={examResults} studentId={currentUser!.id} subjects={subjects} onBack={() => setCurrentPage('dashboard')} />;
           
+          // ✅ New Route
+          case 'shop': return <RewardShop student={currentUser!} onBack={() => setCurrentPage('dashboard')} onPurchase={(updated) => setCurrentUser(updated)} />;
+
           default: return <Dashboard student={currentUser!} onNavigate={setCurrentPage} />;
         }
       })()}

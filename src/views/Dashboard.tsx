@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles, RefreshCw, Trophy, Backpack, AlertCircle, Clock, FileText, Dumbbell } from 'lucide-react';
+import { BookOpen, Gamepad2, BarChart3, Star, Calendar, CheckCircle, History, ArrowLeft, Users, Calculator, FlaskConical, Languages, Sparkles, RefreshCw, Trophy, Backpack, AlertCircle, Clock, FileText, Dumbbell, ShoppingBag, Info } from 'lucide-react';
 import { Student, Assignment, ExamResult, SubjectConfig } from '../types';
+import { speak } from '../utils/soundUtils';
 
 interface DashboardProps {
   student: Student;
@@ -39,23 +40,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   onRefreshSubjects
 }) => {
   const [view, setView] = useState<'main' | 'history' | 'onet' | 'inventory'>('main');
-  
-  // State สำหรับเลือก Tab ในหน้าประวัติ (Homework vs Practice)
   const [historyTab, setHistoryTab] = useState<'homework' | 'practice'>('homework');
-  
-  // 🟢 State สำหรับเลือก Tab ในหน้า O-NET
   const [onetTab, setOnetTab] = useState<'pending' | 'finished'>('pending');
 
   const GRADE_LABELS: Record<string, string> = { 'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3', 'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6', 'M1': 'ม.1', 'M2': 'ม.2', 'M3': 'ม.3', 'ALL': 'ทุกชั้น' };
 
-  // Debug Log
-  useEffect(() => {
-      console.log("--- DASHBOARD DATA DEBUG ---");
-      console.log("Student:", student.id, student.name);
-      console.log("Results Count:", examResults.filter(r => String(r.studentId) === String(student.id)).length);
-  }, [student, examResults]);
-
-  // ✅ Helper: Get the latest result for a specific assignment
+  // ... (Keep existing helper functions same as before) ...
   const getLatestResult = (assignmentId: string) => {
       const relevant = examResults.filter(r => 
           String(r.assignmentId).trim() === String(assignmentId).trim() && 
@@ -66,12 +56,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       return relevant[0];
   };
 
-  // Helper to check if assignment is done safely
   const checkIsDone = (assignmentId: string) => {
       return !!getLatestResult(assignmentId);
   };
 
-  // --- Logic การบ้าน (Assignments) ---
   const myAssignments = assignments.filter(a => {
       if (a.school !== student.school) return false;
       if (a.grade && a.grade !== 'ALL' && student.grade) {
@@ -83,22 +71,16 @@ const Dashboard: React.FC<DashboardProps> = ({
   const onetAssignments = myAssignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
   const generalAssignments = myAssignments.filter(a => !a.title || !a.title.startsWith('[O-NET]'));
 
-  // งานค้าง
   const pendingGeneral = generalAssignments.filter(a => !checkIsDone(a.id));
   const pendingOnet = onetAssignments.filter(a => !checkIsDone(a.id));
-  
-  // งานเสร็จแล้ว (สำหรับการบ้าน)
   const finishedOnet = onetAssignments.filter(a => checkIsDone(a.id));
 
-  // จัดเรียงงานค้าง
   pendingGeneral.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
   
-  // --- Logic ประวัติ (History) ---
   const myHistory = examResults
     .filter(r => String(r.studentId) === String(student.id))
     .sort((a, b) => b.timestamp - a.timestamp); 
 
-  // กรองรายวิชา
   const mySubjects = subjects.filter(s => {
       const subjectSchool = (s.school || '').trim();
       const studentSchool = (student.school || '').trim();
@@ -113,19 +95,10 @@ const Dashboard: React.FC<DashboardProps> = ({
     return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  // ✅ New Helper for History Timestamp
   const formatHistoryDateTime = (timestamp: number) => {
       const date = new Date(timestamp);
-      const datePart = date.toLocaleDateString('th-TH', { 
-          day: 'numeric', 
-          month: 'long', 
-          year: 'numeric' 
-      });
-      const timePart = date.toLocaleTimeString('th-TH', { 
-          hour: '2-digit', 
-          minute: '2-digit', 
-          hour12: false 
-      });
+      const datePart = date.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
+      const timePart = date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
       return `วันที่ ${datePart} ${timePart} น.`;
   };
   
@@ -149,7 +122,12 @@ const Dashboard: React.FC<DashboardProps> = ({
       return ENCOURAGING_MESSAGES[(Math.abs(hash) + index) % ENCOURAGING_MESSAGES.length];
   };
 
-  // --- View: Inventory ---
+  const handleStartOnet = (hw: Assignment) => {
+      // 🟢 Pre-exam announcement updated
+      speak("ตั้งใจทำนะครับ คะแนนเต็มรับ 3 ดาว เจ็ดสิบเปอร์เซ็นต์รับ 2 ดาว ห้าสิบเปอร์เซ็นต์รับ 1 ดาวครับ");
+      if (onStartAssignment) onStartAssignment(hw);
+  };
+
   if (view === 'inventory') {
       return (
           <div className="space-y-6 pb-20 animate-fade-in">
@@ -164,7 +142,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       </div>
                       <div>
                           <h2 className="text-2xl font-bold">กระเป๋าของฉัน</h2>
-                          <p className="text-yellow-100">ของสะสมระดับตำนานที่คุณค้นพบ</p>
+                          <p className="text-yellow-100">ไอเทมที่แลกมาจะอยู่ที่นี่</p>
                       </div>
                   </div>
               </div>
@@ -184,14 +162,15 @@ const Dashboard: React.FC<DashboardProps> = ({
                              item.includes('โพชั่น') || item.includes('น้ำยา') ? '🧪' :
                              item.includes('แผนที่') ? '🗺️' :
                              item.includes('หีบ') ? '⚱️' :
-                             item.includes('ไข่') ? '🥚' : '🎁'}
+                             item.includes('ไข่') ? '🥚' : 
+                             item.includes('บัตร') || item.includes('ดีเจ') || item.includes('คะแนน') ? '🎟️' : '🎁'}
                           </div>
-                          <div className="font-bold text-gray-700 text-sm">{item}</div>
-                          <div className="text-[10px] text-gray-400 mt-1 bg-gray-50 px-2 py-0.5 rounded-full">Rare Item</div>
+                          <div className="font-bold text-gray-700 text-sm">{item.split('#')[0]}</div>
+                          {item.includes('#') && <div className="text-[10px] text-gray-400 mt-1 bg-gray-50 px-2 py-0.5 rounded-full">Coupon</div>}
                       </div>
                   )) : (
                       <div className="col-span-full py-20 text-center text-gray-400 border-2 border-dashed rounded-3xl">
-                          ยังไม่มีของสะสม เล่นเกมสะสมดาวเพื่อแลกของรางวัลนะ!
+                          ยังไม่มีของสะสม ไปที่ "ร้านค้า" เพื่อแลกของรางวัลกันเถอะ!
                       </div>
                   )}
               </div>
@@ -199,12 +178,9 @@ const Dashboard: React.FC<DashboardProps> = ({
       );
   }
 
-  // --- View: History ---
   if (view === 'history') {
-    // 🟢 แบ่งข้อมูลเป็น 2 ส่วน: การบ้าน (มี assignmentId) และ ฝึกฝน (ไม่มี assignmentId)
     const homeworkHistory = myHistory.filter(r => r.assignmentId);
     const practiceHistory = myHistory.filter(r => !r.assignmentId);
-    
     const displayList = historyTab === 'homework' ? homeworkHistory : practiceHistory;
 
     return (
@@ -223,7 +199,6 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {/* 🟢 TABS BUTTONS */}
         <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
             <button 
                 onClick={() => setHistoryTab('homework')} 
@@ -242,7 +217,6 @@ const Dashboard: React.FC<DashboardProps> = ({
         <div className="space-y-4">
           {displayList.length > 0 ? (
             displayList.map(result => {
-              // หา Assignment ต้นฉบับ (ถ้ามี) เพื่อเอาชื่อมาแสดง
               const assignment = assignments.find(a => String(a.id) === String(result.assignmentId));
               const title = assignment?.title || (assignment ? assignment.subject : (result.assignmentId ? 'แบบฝึกหัด (ไม่ระบุ)' : `ฝึกฝน: ${result.subject}`));
               const isOnet = title.startsWith('[O-NET]');
@@ -276,8 +250,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 <span className="text-sm text-gray-400 font-medium">/{total}</span>
                             </div>
                          </div>
-                         
-                         {/* Percentage Badge */}
                          <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xs border-4 ${percent >= 80 ? 'border-green-200 bg-green-100 text-green-700' : percent >= 50 ? 'border-yellow-200 bg-yellow-100 text-yellow-700' : 'border-red-200 bg-red-100 text-red-700'}`}>
                              {percent}%
                          </div>
@@ -288,18 +260,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             })
           ) : (
             <div className="text-center py-20 text-gray-400 bg-white rounded-3xl border-2 border-dashed">
-              {historyTab === 'homework' ? (
-                  <>
-                    <FileText size={48} className="mx-auto mb-2 opacity-20"/>
-                    <p>ยังไม่มีประวัติการส่งการบ้าน</p>
-                  </>
-              ) : (
-                  <>
-                    <Dumbbell size={48} className="mx-auto mb-2 opacity-20"/>
-                    <p>ยังไม่มีประวัติการฝึกฝนเอง</p>
-                    <button onClick={() => setView('main')} className="text-blue-500 underline text-sm mt-2">ไปฝึกฝนกันเถอะ!</button>
-                  </>
-              )}
+              <p>ยังไม่มีประวัติในหมวดนี้</p>
             </div>
           )}
         </div>
@@ -307,7 +268,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     );
   }
 
-  // --- View: O-NET ---
   if (view === 'onet') {
       return (
         <div className="space-y-6 pb-20 animate-fade-in">
@@ -322,42 +282,40 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                     <div>
                         <h2 className="text-2xl font-bold">ภารกิจพิชิต O-NET</h2>
-                        <p className="text-indigo-100 text-sm">ฝึกฝนข้อสอบเสมือนจริง เตรียมความพร้อมสู่ความสำเร็จ</p>
+                        <p className="text-indigo-100 text-sm">ตั้งใจทำเพื่อรับดาวสะสมพิเศษ! 🌟</p>
                     </div>
                 </div>
-                <div className="absolute right-0 top-0 opacity-10 transform translate-x-10 -translate-y-10">
-                    <Trophy size={200} />
+            </div>
+
+            {/* 🟢 RULES CARD UPDATED */}
+            <div className="bg-white p-4 rounded-2xl border-2 border-indigo-100 shadow-sm flex flex-col md:flex-row items-center gap-4 text-sm">
+                <div className="bg-indigo-50 p-2 rounded-full text-indigo-600 flex-shrink-0"><Info size={24}/></div>
+                <div className="flex-1 text-gray-600">
+                    <span className="font-bold text-indigo-700 block mb-1">กติกาการรับดาว O-NET:</span>
+                    <div className="flex flex-wrap gap-2 md:gap-4 text-xs font-bold">
+                        <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded-full border border-green-200"><Star size={12} fill="currentColor"/> คะแนนเต็ม: 3 ดาว</span>
+                        <span className="flex items-center gap-1 text-blue-600 bg-blue-50 px-2 py-1 rounded-full border border-blue-200"><Star size={12} fill="currentColor"/> เกิน 70%: 2 ดาว</span>
+                        <span className="flex items-center gap-1 text-yellow-600 bg-yellow-50 px-2 py-1 rounded-full border border-yellow-200"><Star size={12} fill="currentColor"/> เกิน 50%: 1 ดาว</span>
+                    </div>
                 </div>
             </div>
 
-            {/* 🟢 O-NET TABS */}
             <div className="flex bg-gray-100 p-1 rounded-xl mb-4">
-                <button 
-                    onClick={() => setOnetTab('pending')} 
-                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${onetTab === 'pending' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}
-                >
-                    <BookOpen size={16} /> แบบทดสอบ O-NET ({pendingOnet.length})
+                <button onClick={() => setOnetTab('pending')} className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${onetTab === 'pending' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}>
+                    <BookOpen size={16} /> แบบทดสอบ ({pendingOnet.length})
                 </button>
-                <button 
-                    onClick={() => setOnetTab('finished')} 
-                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${onetTab === 'finished' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}
-                >
-                    <CheckCircle size={16} /> รายการที่ทำเสร็จแล้ว ({finishedOnet.length})
+                <button onClick={() => setOnetTab('finished')} className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${onetTab === 'finished' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}>
+                    <CheckCircle size={16} /> เสร็จแล้ว ({finishedOnet.length})
                 </button>
             </div>
 
-            {/* Content Based on Tab */}
             <div className="space-y-4">
                 {onetTab === 'pending' ? (
-                    // 1. Pending O-NET List
                     <>
-                        <h3 className="font-bold text-gray-800 flex items-center gap-2 hidden"><BookOpen size={20} className="text-indigo-600"/> ข้อสอบที่แนะนำ</h3>
-                        
                         {pendingOnet.length === 0 ? (
                             <div className="text-center py-12 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400">
                                 <Trophy size={48} className="mx-auto mb-2 opacity-20"/>
                                 <p>สุดยอด! คุณทำข้อสอบครบหมดแล้ว</p>
-                                <p className="text-xs mt-1">รอคุณครูเพิ่มข้อสอบใหม่นะ</p>
                             </div>
                         ) : (
                             pendingOnet.map(hw => (
@@ -366,11 +324,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                                         <div className="font-bold text-gray-800 text-lg mb-1">{hw.title}</div>
                                         <div className="flex gap-3 text-sm text-gray-500">
                                             <span className="flex items-center gap-1"><BookOpen size={14}/> {hw.subject}</span>
-                                            <span className="flex items-center gap-1"><Calculator size={14}/> {hw.questionCount} ข้อ</span>
+                                            <span className="flex items-center gap-1 text-orange-600 font-bold bg-orange-50 px-2 py-0.5 rounded-full"><Star size={12} fill="currentColor"/> สูงสุด 3 ดาว</span>
                                         </div>
                                     </div>
                                     <button 
-                                        onClick={() => onStartAssignment && onStartAssignment(hw)}
+                                        onClick={() => handleStartOnet(hw)}
                                         className="w-full md:w-auto bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95"
                                     >
                                         เริ่มทำข้อสอบ
@@ -380,7 +338,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                         )}
                     </>
                 ) : (
-                    // 2. Finished O-NET List
                     <>
                         {finishedOnet.length === 0 ? (
                             <div className="text-center py-12 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400">
@@ -404,7 +361,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                                                 <span>ทำเมื่อ: {result ? formatHistoryDateTime(result.timestamp) : '-'}</span>
                                             </div>
                                         </div>
-                                        
                                         <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end bg-gray-50 p-3 rounded-xl md:bg-transparent md:p-0">
                                             <div className="text-right">
                                                 <div className="text-[10px] text-gray-400 uppercase font-bold">คะแนน</div>
@@ -427,10 +383,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       );
   }
 
-  // --- View: Main Dashboard ---
+  // ... (Rest of component same as original)
   return (
     <div className="space-y-8 pb-20">
-      {/* 1. Welcome Banner & Gamification Status */}
+      {/* 1. Welcome Banner */}
       <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-3xl p-6 text-white shadow-lg relative overflow-hidden">
         <div className="absolute top-0 right-0 opacity-10 transform translate-x-10 -translate-y-10"><Star size={150} /></div>
         <div className="relative z-10">
@@ -444,37 +400,26 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div>
                     <h2 className="text-2xl font-bold mb-1">สวัสดี, {student.name.split(' ')[0]}!</h2>
                     <div className="flex gap-2 text-indigo-100 items-center text-sm">
-                        <span>สู้ต่อไปนะ! สะสมดาวให้ครบ 5 ดวงเพื่อรับรางวัล</span>
+                        <span>สะสมดาวเพื่อแลกของรางวัลสุดพิเศษ!</span>
                     </div>
                 </div>
             </div>
 
-            {/* 🟢 GAMIFICATION: STAR STAMP CARD (UPDATED TO 5 SLOTS) */}
-            <div className="bg-black/20 rounded-2xl p-4 backdrop-blur-sm mb-3">
-                <div className="flex justify-between items-center mb-2">
-                    <div className="text-xs text-indigo-200 font-bold uppercase flex items-center gap-1">
-                        <Star size={12} className="text-yellow-300 fill-yellow-300"/> บัตรสะสมดาว (Level {student.level || 1})
-                    </div>
-                    <div className="text-xs text-indigo-200 font-mono">{student.tokens || 0}/5</div>
+            {/* 🟢 BUTTON TO SHOP */}
+            <button 
+                onClick={() => onNavigate('shop')}
+                className="w-full bg-gradient-to-r from-yellow-400 to-orange-500 text-yellow-900 font-bold py-3 px-6 rounded-xl shadow-lg hover:scale-[1.02] transition-transform flex items-center justify-between"
+            >
+                <div className="flex items-center gap-2">
+                    <ShoppingBag size={20} />
+                    <span>ร้านค้าแลกรางวัล</span>
                 </div>
-                {/* 5 Star Slots Grid */}
-                <div className="grid grid-cols-5 gap-3">
-                    {Array.from({ length: 5 }).map((_, index) => {
-                        const hasStar = index < (student.tokens || 0);
-                        return (
-                            <div key={index} className={`aspect-square rounded-full flex items-center justify-center border-2 transition-all ${hasStar ? 'bg-yellow-400 border-yellow-200 shadow-[0_0_10px_rgba(250,204,21,0.6)] transform scale-110' : 'bg-black/30 border-white/10'}`}>
-                                <Star size={20} className={hasStar ? 'text-yellow-900 fill-yellow-900' : 'text-white/20'} />
-                            </div>
-                        );
-                    })}
+                <div className="bg-white/30 px-3 py-1 rounded-lg text-sm flex items-center gap-1">
+                    <Star size={14} fill="currentColor" /> {student.stars} ดาว
                 </div>
-                <div className="flex justify-between items-center text-[10px] text-indigo-200 mt-2 px-1">
-                    <span className="flex items-center gap-1">⭐ สะสมครบ 5 ดาว แลกของรางวัล</span>
-                    <span className="bg-white/10 px-2 py-0.5 rounded">เล่นครบ 5 รอบ รับดาวความขยัน</span>
-                </div>
-            </div>
+            </button>
             
-            <div className="flex gap-2">
+            <div className="flex gap-2 mt-4">
                 <div className="text-center bg-white/10 rounded-lg p-2 flex-1">
                     <div className="text-[10px] text-indigo-200 uppercase mb-1">เล่นไปแล้ว</div>
                     <div className="flex items-center justify-center gap-1">
@@ -493,8 +438,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* 2. การบ้านทั่วไป (Pending General Assignments) */}
-      {/* Show only if there are actually pending items */}
+      {/* 2. Pending General Assignments */}
       {pendingGeneral.length > 0 ? (
         <div className="bg-white border-l-4 border-orange-500 rounded-2xl p-6 shadow-md animate-fade-in">
             <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -503,11 +447,9 @@ const Dashboard: React.FC<DashboardProps> = ({
             </h3>
             <div className="space-y-3">
                 {pendingGeneral.map(hw => {
-                    // ตรวจสอบวันหมดเขต
                     const deadlineDate = new Date(hw.deadline);
                     const now = new Date();
                     const isExpired = deadlineDate < now;
-                    
                     return (
                         <div key={hw.id} className={`p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center border gap-3 ${isExpired ? 'bg-red-50 border-red-100' : 'bg-orange-50 border-orange-100'}`}>
                             <div className="flex-1">
@@ -522,11 +464,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 <div className={`text-sm mt-1 flex items-center gap-2 ${isExpired ? 'text-red-500 font-medium' : 'text-gray-600'}`}>
                                   <Clock size={14}/> {hw.questionCount} ข้อ • ส่งภายใน {formatDate(hw.deadline)}
                                 </div>
-                                {hw.createdBy && (
-                                   <div className="text-xs text-purple-600 mt-1 font-medium bg-purple-50 px-2 py-0.5 rounded w-fit">
-                                      ครู{hw.createdBy}
-                                   </div>
-                                )}
                             </div>
                             <button 
                                 onClick={() => onStartAssignment && onStartAssignment(hw)}
@@ -543,7 +480,6 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
         </div>
       ) : (
-        // Only show "All Done" if we have history but no pending
         (myHistory.length > 0) && (
             <div className="bg-green-50 border border-green-200 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 text-green-700 shadow-sm text-center animate-fade-in">
                 <div className="bg-green-100 p-4 rounded-full"><CheckCircle size={32} /></div>
@@ -555,7 +491,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         )
       )}
 
-      {/* 3. วิชาเรียนของคุณ (Your Subjects) */}
+      {/* 3. Your Subjects */}
       <div>
         <div className="flex justify-between items-center mb-4">
             <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -574,7 +510,6 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <BookOpen size={40} className="text-gray-300"/>
                 </div>
                 <p>ยังไม่มีรายวิชาสำหรับโรงเรียน: <span className="font-bold text-gray-500">{student.school || 'ไม่ระบุ'}</span></p>
-                <p className="text-sm mt-1">ระดับชั้น: {GRADE_LABELS[student.grade || ''] || student.grade || 'ไม่ระบุ'}</p>
                 <button onClick={onRefreshSubjects} className="mt-4 text-indigo-600 underline text-sm">ลองรีเฟรชข้อมูล</button>
             </div>
         ) : (
@@ -594,25 +529,19 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 "{getEncouragement(sub.name, index)}"
                             </p>
                         </div>
-                        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <div className="bg-white/90 px-3 py-1 rounded-full text-xs font-bold shadow-sm text-blue-600">
-                                เริ่มเลย
-                            </div>
-                        </div>
                     </button>
                 ))}
             </div>
         )}
       </div>
 
-      {/* 4. เมนูอื่นๆ (Menu) */}
+      {/* 4. Menu */}
       <div>
         <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <Sparkles className="text-yellow-500" /> เมนูเพิ่มเติม
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             
-            {/* 🟢 การ์ดใหม่: พิชิต O-NET */}
             <button onClick={() => setView('onet')} className="group bg-white rounded-3xl p-4 shadow-sm hover:shadow-lg transition-all border-b-4 border-indigo-100 hover:border-indigo-500 hover:-translate-y-1 flex flex-col items-center justify-center gap-2 text-center h-32 relative overflow-hidden">
                 <div className="bg-indigo-100 p-3 rounded-full text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors relative z-10">
                     <Trophy size={28} />
@@ -621,19 +550,16 @@ const Dashboard: React.FC<DashboardProps> = ({
                 {pendingOnet.length > 0 && <span className="absolute top-2 right-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">{pendingOnet.length}</span>}
             </button>
 
-            {/* ปุ่มเกมแข่งขัน */}
             <button onClick={() => onNavigate('game')} className="group bg-white rounded-3xl p-4 shadow-sm hover:shadow-lg transition-all border-b-4 border-purple-100 hover:border-purple-500 hover:-translate-y-1 flex flex-col items-center justify-center gap-2 text-center h-32">
                 <div className="bg-purple-100 p-3 rounded-full text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors"><Gamepad2 size={28} /></div>
                 <span className="font-bold text-gray-700 text-sm">เกมแข่งขัน</span>
             </button>
 
-            {/* ปุ่มประวัติ */}
             <button onClick={() => setView('history')} className="group bg-white rounded-3xl p-4 shadow-sm hover:shadow-lg transition-all border-b-4 border-yellow-100 hover:border-yellow-500 hover:-translate-y-1 flex flex-col items-center justify-center gap-2 text-center h-32">
                 <div className="bg-yellow-100 p-3 rounded-full text-yellow-600 group-hover:bg-yellow-600 group-hover:text-white transition-colors"><History size={28} /></div>
                 <span className="font-bold text-gray-700 text-sm">ประวัติส่งงาน</span>
             </button>
 
-            {/* ปุ่มสถิติ */}
             <button onClick={() => onNavigate('stats')} className="group bg-white rounded-3xl p-4 shadow-sm hover:shadow-lg transition-all border-b-4 border-green-100 hover:border-green-500 hover:-translate-y-1 flex flex-col items-center justify-center gap-2 text-center h-32">
                 <div className="bg-green-100 p-3 rounded-full text-green-600 group-hover:bg-green-600 group-hover:text-white transition-colors"><BarChart3 size={28} /></div>
                 <span className="font-bold text-gray-700 text-sm">สถิติการเรียน</span>

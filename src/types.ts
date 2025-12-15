@@ -26,6 +26,17 @@ export interface Teacher {
   citizenId?: string; // New field for identification
 }
 
+// ✅ New Interface for Shop Items
+export interface ShopItem {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  icon: string;
+  type: 'DIGITAL' | 'PRIVILEGE'; // DIGITAL = โชว์ในกระเป๋า, PRIVILEGE = คูปองใช้จริง
+  color: string;
+}
+
 // ✅ New Interface for School Management
 export interface School {
   id: string;

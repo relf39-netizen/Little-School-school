@@ -12,11 +12,12 @@ interface ResultsProps {
   earnedPerfectToken?: boolean;
   unlockedReward?: string | null;
   leveledUp?: boolean;
+  earnedStars?: number; // 🟢 New Prop
   onRetry: () => void;
   onHome: () => void;
 }
 
-const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isGame = false, earnedEffortToken, earnedPerfectToken, unlockedReward, leveledUp, onRetry, onHome }) => {
+const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isGame = false, earnedEffortToken, earnedPerfectToken, unlockedReward, leveledUp, earnedStars, onRetry, onHome }) => {
   const percentage = (score / total) * 100;
   const [countdown, setCountdown] = useState(10);
   const [showReward, setShowReward] = useState(false);
@@ -24,20 +25,31 @@ const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isG
   useEffect(() => {
     // Determine Feedback Speech
     let speechText = "";
+    
+    // O-NET Star logic feedback
+    if (earnedStars !== undefined) {
+       if (earnedStars > 0) {
+           speechText += `คุณได้รับดาวสะสมเพิ่ม ${earnedStars} ดวงครับ! `;
+       }
+    }
+
     if (leveledUp) {
-        speechText = "ยินดีด้วยครับ คุณได้เลื่อนระดับใหม่แล้ว! ";
+        speechText += "ยินดีด้วยครับ คุณได้เลื่อนระดับใหม่แล้ว! ";
     }
     
     if (earnedEffortToken || earnedPerfectToken) {
-        speechText += "คุณได้รับดาวสะสมเพิ่ม! ";
+        speechText += "คุณได้รับดาวสะสมพิเศษ! ";
     }
 
     if (percentage >= 80) {
       speechText += `สุดยอดไปเลย! ได้ ${score} เต็ม ${total} คะแนน`;
-    } else if (percentage >= 50) {
+    } else if (percentage >= 60) {
       speechText += `เก่งมากครับ ได้ ${score} คะแนน`;
+    } else if (percentage >= 50) {
+      speechText += `พยายามได้ดีครับ ได้ ${score} คะแนน เกือบถึงเป้าหมายแล้ว`;
     } else {
-      speechText += `พยายามได้ดีครับ ได้ ${score} คะแนน สู้ต่อไปนะ`;
+      // 🟢 Updated Low Score Encouragement
+      speechText += `ไม่เป็นไรครับ ความพยายามอยู่ที่ไหน ความสำเร็จอยู่ที่นั่น ลองใหม่อีกครั้งนะครับ`;
     }
 
     speak(speechText);
@@ -65,7 +77,7 @@ const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isG
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [score, total, percentage, isHomework, onHome, leveledUp, earnedEffortToken, earnedPerfectToken, unlockedReward]);
+  }, [score, total, percentage, isHomework, onHome, leveledUp, earnedEffortToken, earnedPerfectToken, unlockedReward, earnedStars]);
 
   const getRewardIcon = (name: string) => {
       if (!name) return '🎁';
@@ -141,7 +153,25 @@ const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isG
         </div>
       </div>
 
-      {/* 🟢 GAMIFICATION FEEDBACK */}
+      {/* 🟢 NEW: EARNED STARS DISPLAY (Show only if stars > 0) */}
+      {earnedStars !== undefined && earnedStars > 0 && (
+          <div className="bg-gradient-to-r from-yellow-100 to-orange-100 text-orange-800 p-4 rounded-3xl border-2 border-orange-300 shadow-md flex items-center justify-between gap-4 animate-scale-in w-full max-w-sm mb-6 relative overflow-hidden">
+               <div className="absolute top-0 right-0 opacity-20 transform translate-x-4 -translate-y-4"><Star size={80}/></div>
+               <div className="font-bold text-lg text-left">
+                   คุณได้รับดาวเพิ่ม
+               </div>
+               <div className="flex items-center gap-2 bg-white/50 px-4 py-2 rounded-2xl border border-orange-200">
+                   <div className="flex">
+                       {[...Array(earnedStars)].map((_, i) => (
+                           <Star key={i} fill="currentColor" className="text-yellow-500 drop-shadow-sm animate-bounce" style={{animationDelay: `${i*0.1}s`}} size={28}/>
+                       ))}
+                   </div>
+                   <span className="text-2xl font-black text-orange-600">+{earnedStars}</span>
+               </div>
+          </div>
+      )}
+
+      {/* GAMIFICATION FEEDBACK */}
       <div className="flex flex-col gap-3 w-full max-w-sm mb-6">
           {leveledUp && (
               <div className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white p-4 rounded-2xl shadow-lg flex items-center gap-4 animate-fade-in border-b-4 border-indigo-800">
@@ -150,30 +180,6 @@ const Results: React.FC<ResultsProps> = ({ score, total, isHomework = false, isG
                       <div className="font-bold text-lg">LEVEL UP!</div>
                       <div className="text-xs text-purple-100">ใช้ 10 ดาวแลกของรางวัลแล้ว</div>
                   </div>
-              </div>
-          )}
-          
-          {/* Card 1: Effort Star */}
-          {earnedEffortToken && (
-              <div className="bg-blue-100 text-blue-800 p-3 rounded-2xl border-2 border-blue-200 shadow-sm flex items-center gap-3 animate-slide-up">
-                   <div className="bg-blue-500 p-2 rounded-full text-white"><Zap fill="currentColor" size={20}/></div>
-                   <div className="text-left flex-1">
-                       <div className="font-bold text-sm">ขยันมาก!</div>
-                       <div className="text-xs text-blue-600">เล่นครบ 5 รอบ รับดาว +1</div>
-                   </div>
-                   <div className="text-xl font-black text-blue-500">+1</div>
-              </div>
-          )}
-
-          {/* Card 2: Perfect Score Star */}
-          {earnedPerfectToken && (
-              <div className="bg-yellow-100 text-yellow-800 p-3 rounded-2xl border-2 border-yellow-300 shadow-sm flex items-center gap-3 animate-slide-up" style={{animationDelay: '0.2s'}}>
-                   <div className="bg-yellow-400 p-2 rounded-full text-white"><Star fill="currentColor" size={20}/></div>
-                   <div className="text-left flex-1">
-                       <div className="font-bold text-sm">เก่งทะลุโลก!</div>
-                       <div className="text-xs text-yellow-700">คะแนนเต็ม รับดาว +1</div>
-                   </div>
-                   <div className="text-xl font-black text-yellow-500">+1</div>
               </div>
           )}
       </div>
