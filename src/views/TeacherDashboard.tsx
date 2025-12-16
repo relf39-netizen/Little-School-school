@@ -754,6 +754,67 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                 />
             )}
 
+            {/* ✅ PROFILE MANAGEMENT TAB */}
+            {activeTab === 'profile' && (
+                <div className="max-w-2xl mx-auto">
+                    <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                        <User className="text-teal-600"/> จัดการข้อมูลส่วนตัว
+                    </h3>
+                    
+                    <div className="bg-white p-8 rounded-2xl border border-teal-100 shadow-sm">
+                        <div className="flex items-center gap-4 mb-8">
+                            <div className="w-20 h-20 bg-teal-100 rounded-full flex items-center justify-center text-teal-600 text-4xl">
+                                <User />
+                            </div>
+                            <div>
+                                <h4 className="text-lg font-bold text-gray-800">{teacher.name}</h4>
+                                <p className="text-gray-500 text-sm">{teacher.school} • {teacher.role || 'Teacher'}</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">ชื่อ-นามสกุล</label>
+                                <input 
+                                    type="text" 
+                                    value={profileName} 
+                                    onChange={e => setProfileName(e.target.value)} 
+                                    className="w-full p-3 border rounded-xl bg-gray-50 focus:bg-white outline-none focus:ring-2 focus:ring-teal-200 transition"
+                                />
+                            </div>
+                            
+                            <div className="pt-4 border-t border-gray-100">
+                                <label className="block text-sm font-bold text-gray-700 mb-1">เปลี่ยนรหัสผ่าน (เว้นว่างไว้หากไม่ต้องการเปลี่ยน)</label>
+                                <div className="grid md:grid-cols-2 gap-4">
+                                    <input 
+                                        type="password" 
+                                        value={profilePassword} 
+                                        onChange={e => setProfilePassword(e.target.value)} 
+                                        placeholder="รหัสผ่านใหม่"
+                                        className="w-full p-3 border rounded-xl bg-gray-50 focus:bg-white outline-none focus:ring-2 focus:ring-teal-200 transition"
+                                    />
+                                    <input 
+                                        type="password" 
+                                        value={profileConfirmPass} 
+                                        onChange={e => setProfileConfirmPass(e.target.value)} 
+                                        placeholder="ยืนยันรหัสผ่านใหม่"
+                                        className="w-full p-3 border rounded-xl bg-gray-50 focus:bg-white outline-none focus:ring-2 focus:ring-teal-200 transition"
+                                    />
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={handleUpdateProfile} 
+                                disabled={isProcessing}
+                                className="w-full bg-teal-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-teal-700 transition disabled:opacity-50 mt-4 flex items-center justify-center gap-2"
+                            >
+                                {isProcessing ? 'กำลังบันทึก...' : <><Save size={20}/> บันทึกการเปลี่ยนแปลง</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MIGRATION TAB */}
             {activeTab === 'migration' && isAdmin && (
                 <div className="max-w-4xl mx-auto">
