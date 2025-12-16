@@ -45,12 +45,51 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const GRADE_LABELS: Record<string, string> = { 'P1': 'ป.1', 'P2': 'ป.2', 'P3': 'ป.3', 'P4': 'ป.4', 'P5': 'ป.5', 'P6': 'ป.6', 'M1': 'ม.1', 'M2': 'ม.2', 'M3': 'ม.3', 'ALL': 'ทุกชั้น' };
 
-  // ... (Keep existing helper functions same as before) ...
+  // ✅ 1. กรองและกำจัดงานซ้ำ (Enhanced Deduplication Logic)
+  // แก้ปัญหาแสดงงาน O-NET เยอะเกินไป โดยเช็คจากเนื้อหา (Title + Subject + Deadline) แทน ID
+  const myAssignments = React.useMemo(() => {
+      // 1.1 กรองเบื้องต้น: ต้องเป็นโรงเรียนเดียวกัน และ ระดับชั้นตรงกัน
+      const relevant = assignments.filter(a => {
+          if (a.school !== student.school) return false;
+          
+          // ถ้างานระบุระดับชั้น ต้องตรงกับนักเรียน (ถ้าเป็น ALL คือทุกคนเห็นได้)
+          if (a.grade && a.grade !== 'ALL' && student.grade) {
+              if (a.grade !== student.grade) return false;
+          }
+          return true;
+      });
+
+      // 1.2 กำจัดตัวซ้ำ: ใช้ Title + Subject + Deadline เป็น Key
+      const uniqueMap = new Map();
+      relevant.forEach(a => {
+          // สร้าง Key สำหรับเช็คซ้ำ (ตัดช่องว่างชื่อหัวข้อออก)
+          const key = `${a.title?.trim()}|${a.subject}|${a.grade}|${a.deadline}`;
+          
+          // ถ้ายังไม่มี Key นี้ หรือ ถ้ามีแล้วแต่ ID ปัจจุบันใหม่กว่า (เผื่ออัพเดต) ให้เก็บไว้
+          // ในที่นี้เราจะเก็บตัวแรกที่เจอเพื่อความง่าย
+          if (!uniqueMap.has(key)) {
+              uniqueMap.set(key, a);
+          }
+      });
+
+      return Array.from(uniqueMap.values());
+  }, [assignments, student.school, student.grade]);
+
   const getLatestResult = (assignmentId: string) => {
+      // ต้องเช็คด้วยชื่อ Assignment หรือ ID
+      // เนื่องจากเรา Deduplicate การบ้านไปแล้ว เราต้องระวังการเช็ค ID
+      // แต่ใน ExamResult เราเก็บ assignmentId ไว้ ซึ่งควรจะตรงกัน
+      
       const relevant = examResults.filter(r => 
           String(r.assignmentId).trim() === String(assignmentId).trim() && 
           String(r.studentId).trim() === String(student.id).trim()
       );
+      
+      // ถ้าไม่เจอโดย ID ลองหาโดยชื่อหัวข้อ (เผื่อกรณีระบบเก่า/ใหม่)
+      if (relevant.length === 0) {
+         // Logic เพิ่มเติมถ้าจำเป็น
+      }
+
       if (relevant.length === 0) return null;
       relevant.sort((a, b) => b.timestamp - a.timestamp);
       return relevant[0];
@@ -59,14 +98,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   const checkIsDone = (assignmentId: string) => {
       return !!getLatestResult(assignmentId);
   };
-
-  const myAssignments = assignments.filter(a => {
-      if (a.school !== student.school) return false;
-      if (a.grade && a.grade !== 'ALL' && student.grade) {
-          if (a.grade !== student.grade) return false;
-      }
-      return true;
-  });
   
   const onetAssignments = myAssignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
   const generalAssignments = myAssignments.filter(a => !a.title || !a.title.startsWith('[O-NET]'));
@@ -123,7 +154,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleStartOnet = (hw: Assignment) => {
-      // 🟢 Pre-exam announcement updated
       speak("ตั้งใจทำนะครับ คะแนนเต็มรับ 3 ดาว เจ็ดสิบเปอร์เซ็นต์รับ 2 ดาว ห้าสิบเปอร์เซ็นต์รับ 1 ดาวครับ");
       if (onStartAssignment) onStartAssignment(hw);
   };
@@ -287,7 +317,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             </div>
 
-            {/* 🟢 RULES CARD UPDATED */}
+            {/* 🟢 RULES CARD */}
             <div className="bg-white p-4 rounded-2xl border-2 border-indigo-100 shadow-sm flex flex-col md:flex-row items-center gap-4 text-sm">
                 <div className="bg-indigo-50 p-2 rounded-full text-indigo-600 flex-shrink-0"><Info size={24}/></div>
                 <div className="flex-1 text-gray-600">

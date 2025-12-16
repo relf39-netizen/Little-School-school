@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Teacher, Student, Assignment, Question, SubjectConfig, School, RegistrationRequest, SchoolStats } from '../types';
-import { UserPlus, BarChart2, FileText, LogOut, Gamepad2, Calendar, User, Building, UserCog, MonitorSmartphone, Database, ArrowLeft, Trophy, UploadCloud, RefreshCw, AlertTriangle, ToggleLeft, ToggleRight, Trash2, Edit, PlusCircle, CreditCard, X, GraduationCap, KeyRound, Sparkles, List, CheckCircle, Clock, Wand2, BrainCircuit, Loader2, Save, Copy, Search } from 'lucide-react';
+import { UserPlus, BarChart2, FileText, LogOut, Gamepad2, Calendar, User, Building, UserCog, MonitorSmartphone, Database, ArrowLeft, Trophy, UploadCloud, RefreshCw, AlertTriangle, ToggleLeft, ToggleRight, Trash2, Edit, PlusCircle, CreditCard, X, GraduationCap, KeyRound, Sparkles, List, CheckCircle, Clock, Wand2, BrainCircuit, Loader2, Save, Copy, Search, Eye } from 'lucide-react';
 import { getTeacherDashboard, manageStudent, addAssignment, addQuestion, editQuestion, manageTeacher, getAllTeachers, deleteQuestion, deleteAssignment, getSubjects, addSubject, deleteSubject, getSchools, manageSchool, getRegistrationStatus, toggleRegistrationStatus, getPendingRegistrations, approveRegistration, rejectRegistration, verifyStudentLogin, getQuestionsBySubject, getAllSchoolStats } from '../services/api';
 import { generateQuestionWithAI, GeneratedQuestion } from '../services/aiService';
 import { supabase } from '../services/firebaseConfig';
@@ -73,6 +73,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const [impersonateId, setImpersonateId] = useState('');
   
   const [selectedStudentForStats, setSelectedStudentForStats] = useState<Student | null>(null);
+  
+  // ✅ New: State for viewing O-NET assignment scores
+  const [viewingOnetAssignment, setViewingOnetAssignment] = useState<Assignment | null>(null);
 
   // ✅ Permissions Logic
   const getTeacherGrades = (t: Teacher): string[] => {
@@ -155,6 +158,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
     // Reset view state on tab change
     setViewLevel('GRADES');
     setSelectedGradeFilter(null);
+    setViewingOnetAssignment(null); // Reset O-NET viewer
     
     // Auto-drill down if single grade
     if (!canManageAll && myGrades.length === 1) {
@@ -352,139 +356,74 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
   const handleFinalizeAssignment = async () => { if (newlyGeneratedQuestions.length > 0) { setIsProcessing(true); const tid = normalizeId(teacher.id); for (const q of newlyGeneratedQuestions) { await addQuestion({ subject: assignSubject, grade: assignGrade, text: q.text, image: q.image || '', c1: q.c1, c2: q.c2, c3: q.c3, c4: q.c4, correct: q.correct, explanation: q.explanation, school: teacher.school, teacherId: tid }); } } setIsProcessing(true); let finalTitle = assignTitle; if (activeTab === 'onet') { if (!finalTitle) finalTitle = `[O-NET] ฝึกฝน${assignSubject} เรื่อง ${assignAiTopic || 'ทั่วไป'}`; else if (!finalTitle.startsWith('[O-NET]')) finalTitle = `[O-NET] ${finalTitle}`; } else { if (!finalTitle) finalTitle = `การบ้าน ${assignSubject}`; } const success = await addAssignment(teacher.school, assignSubject, assignGrade, assignCount, assignDeadline, teacher.name, finalTitle); setIsProcessing(false); if (success) { alert('✅ สั่งการบ้านเรียบร้อยแล้ว'); setAssignDeadline(''); setAssignTitle(''); setNewlyGeneratedQuestions([]); setAssignAiTopic(''); if (activeTab === 'onet') await loadData(); else { setActiveTab('assignments'); await loadData(); } } else { alert('เกิดข้อผิดพลาดในการสร้างการบ้าน'); } };
   const handleDeleteAssignment = async (id: string) => { if (!confirm('ยืนยันลบการบ้านนี้?')) return; setIsProcessing(true); const success = await deleteAssignment(id); setIsProcessing(false); if (success) { setAssignments(prev => prev.filter(a => a.id !== id)); loadData(); } };
   
-  // ✅ New Redo Assignment Handler
   const handleRedoAssignment = async (original: Assignment) => {
         if(!confirm(`ต้องการมอบหมายงาน "${original.title || original.subject}" ให้นักเรียนทำอีกครั้งใช่ไหม?`)) return;
         
         setIsProcessing(true);
-        // Default deadline: 3 days from now
         const date = new Date();
         date.setDate(date.getDate() + 3);
         const newDeadline = date.toISOString().split('T')[0];
         
-        const success = await addAssignment(
-            original.school,
-            original.subject,
-            original.grade || 'ALL',
-            original.questionCount,
-            newDeadline,
-            original.createdBy,
-            original.title ? `${original.title} (รอบเพิ่มเติม)` : `${original.subject} (รอบเพิ่มเติม)`
-        );
+        const success = await addAssignment(original.school, original.subject, original.grade || 'ALL', original.questionCount, newDeadline, original.createdBy, original.title ? `${original.title} (รอบเพิ่มเติม)` : `${original.subject} (รอบเพิ่มเติม)`);
         
-        if(success) {
-            alert('✅ มอบหมายงานซ้ำเรียบร้อยแล้ว');
-            await loadData();
-        } else {
-            alert('เกิดข้อผิดพลาดในการมอบหมายซ้ำ');
-        }
+        if(success) { alert('✅ มอบหมายงานซ้ำเรียบร้อยแล้ว'); await loadData(); } else { alert('เกิดข้อผิดพลาดในการมอบหมายซ้ำ'); }
         setIsProcessing(false);
   };
 
-  const handleViewAssignment = (a: Assignment) => {
-      // Logic handled by AssignmentManager in assignments tab
-      // For O-NET tab, we might need simple view or just direct user to Assignment tab
-      alert("กรุณาดูรายละเอียดในเมนู 'สั่งการบ้าน' (Assignments) เพื่อดูข้อมูลครบถ้วน");
-  };
-
-  // ✅ Migration Handler
   const handleMigration = async () => {
       if (!migrationFile) return alert("กรุณาเลือกไฟล์ JSON");
       setIsMigrating(true);
       const logs: string[] = [];
       const log = (msg: string) => { logs.push(msg); setMigrationLog([...logs]); };
-      
       try {
           const text = await migrationFile.text();
           const json = JSON.parse(text);
-          
           log(`Loaded file: ${migrationFile.name}`);
-          
-          // Helper to normalize Firebase object to array
-          const toArray = (obj: any) => {
-             if (Array.isArray(obj)) return obj.filter(x => x);
-             return Object.keys(obj).map(key => ({ id: key, ...obj[key] }));
-          };
-
+          const toArray = (obj: any) => { if (Array.isArray(obj)) return obj.filter(x => x); return Object.keys(obj).map(key => ({ id: key, ...obj[key] })); };
           if (migrationTarget === 'auto') {
-              // Try to detect root keys
-              if (json.students) {
-                  log("Detected 'students' node. Importing students...");
-                  const rows = toArray(json.students);
-                  const { error } = await supabase.from('students').upsert(rows);
-                  if(error) log(`Error importing students: ${error.message}`);
-                  else log(`✅ Imported ${rows.length} students.`);
-              }
-              if (json.teachers) {
-                  log("Detected 'teachers' node. Importing teachers...");
-                  const rows = toArray(json.teachers);
-                  const { error } = await supabase.from('teachers').upsert(rows);
-                  if(error) log(`Error importing teachers: ${error.message}`);
-                  else log(`✅ Imported ${rows.length} teachers.`);
-              }
-              if (json.questions) {
-                  log("Detected 'questions' node. Importing questions...");
-                  // Need to fix choices structure if from old system
-                  let rows = toArray(json.questions);
-                  // Normalize fields
-                  rows = rows.map((q: any) => ({
-                      id: q.id,
-                      subject: q.subject,
-                      text: q.text,
-                      grade: q.grade || 'P6',
-                      // Fix choices: convert array of objects to simple jsonb if needed, or keep as is if compatible
-                      choices: JSON.stringify(q.choices), 
-                      correct_choice_id: q.correctChoiceId,
-                      explanation: q.explanation,
-                      school: q.school,
-                      teacher_id: q.teacherId
-                  }));
-
-                  const { error } = await supabase.from('questions').upsert(rows);
-                  if(error) log(`Error importing questions: ${error.message}`);
-                  else log(`✅ Imported ${rows.length} questions.`);
-              }
+              if (json.students) { log("Detected 'students' node..."); const rows = toArray(json.students); const { error } = await supabase.from('students').upsert(rows); if(error) log(`Error: ${error.message}`); else log(`✅ Imported ${rows.length} students.`); }
+              if (json.teachers) { log("Detected 'teachers' node..."); const rows = toArray(json.teachers); const { error } = await supabase.from('teachers').upsert(rows); if(error) log(`Error: ${error.message}`); else log(`✅ Imported ${rows.length} teachers.`); }
+              if (json.questions) { log("Detected 'questions' node..."); let rows = toArray(json.questions); rows = rows.map((q: any) => ({ id: q.id, subject: q.subject, text: q.text, grade: q.grade || 'P6', choices: JSON.stringify(q.choices), correct_choice_id: q.correctChoiceId, explanation: q.explanation, school: q.school, teacher_id: q.teacherId })); const { error } = await supabase.from('questions').upsert(rows); if(error) log(`Error: ${error.message}`); else log(`✅ Imported ${rows.length} questions.`); }
           } else {
-               // Specific table import
                log(`Importing into '${migrationTarget}'...`);
-               let rows = toArray(json); // Assume the file IS the data for that table
-               
-               // Adjust fields based on target
+               let rows = toArray(json);
                if (migrationTarget === 'questions') {
-                    rows = rows.map((q: any) => ({
-                      id: q.id,
-                      subject: q.subject,
-                      text: q.text,
-                      grade: q.grade || 'P6',
-                      choices: typeof q.choices === 'object' ? JSON.stringify(q.choices) : q.choices, 
-                      correct_choice_id: q.correctChoiceId || q.correct_choice_id,
-                      explanation: q.explanation,
-                      school: q.school,
-                      teacher_id: q.teacherId || q.teacher_id
-                   }));
+                    rows = rows.map((q: any) => ({ id: q.id, subject: q.subject, text: q.text, grade: q.grade || 'P6', choices: typeof q.choices === 'object' ? JSON.stringify(q.choices) : q.choices, correct_choice_id: q.correctChoiceId || q.correct_choice_id, explanation: q.explanation, school: q.school, teacher_id: q.teacherId || q.teacher_id }));
                }
-               
                const { error } = await supabase.from(migrationTarget).upsert(rows);
                if(error) throw error;
                log(`✅ Imported ${rows.length} rows into ${migrationTarget}.`);
           }
-          
           log("Migration Completed.");
-
-      } catch (e: any) {
-          log(`❌ Error: ${e.message}`);
-          console.error(e);
-      } finally {
-          setIsMigrating(false);
-      }
+      } catch (e: any) { log(`❌ Error: ${e.message}`); console.error(e); } finally { setIsMigrating(false); }
   };
 
   const formatDate = (dateString: string) => { if (!dateString) return '-'; const date = new Date(dateString); if (isNaN(date.getTime())) return dateString; return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }); };
   
-  const onetAssignments = assignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
-  let filteredOnetAssignments = onetAssignments;
-  if (onetSubjectFilter !== 'ALL') filteredOnetAssignments = filteredOnetAssignments.filter(a => a.subject === onetSubjectFilter);
-  if (onetLevel) filteredOnetAssignments = filteredOnetAssignments.filter(a => a.grade === onetLevel);
+  // ✅ FIX: Deduplicate & Filter O-NET Assignments (Memoized)
+  const filteredOnetAssignments = useMemo(() => {
+      // 1. Filter O-NET
+      let list = assignments.filter(a => a.title && a.title.startsWith('[O-NET]'));
+
+      // 2. Filter by Grade (Important for P6 requirement)
+      if (onetLevel) {
+          list = list.filter(a => a.grade === onetLevel);
+      }
+
+      // 3. Filter by Subject
+      if (onetSubjectFilter !== 'ALL') {
+          list = list.filter(a => a.subject === onetSubjectFilter);
+      }
+
+      // 4. Deduplicate: Remove items with exact same Title, Subject, Grade, Deadline
+      const seen = new Set();
+      return list.filter(a => {
+          const key = `${a.title?.trim()}|${a.subject}|${a.grade}|${a.deadline}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+      });
+  }, [assignments, onetLevel, onetSubjectFilter]);
 
   // Filter students by selected Grade (For Admin Stats)
   const filteredStudents = students.filter(s => 
@@ -580,6 +519,64 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ✅ O-NET View Scores Modal */}
+      {viewingOnetAssignment && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-fade-in">
+                <div className="p-4 border-b flex justify-between items-center bg-indigo-50">
+                    <div>
+                        <h3 className="font-bold text-lg text-indigo-900 flex items-center gap-2">
+                            <Trophy size={20} className="text-yellow-500"/> 
+                            {viewingOnetAssignment.title || viewingOnetAssignment.subject}
+                        </h3>
+                        <p className="text-xs text-indigo-600">
+                            {GRADE_LABELS[viewingOnetAssignment.grade || 'ALL'] || viewingOnetAssignment.grade} | 
+                            ส่งภายใน: {formatDate(viewingOnetAssignment.deadline)}
+                        </p>
+                    </div>
+                    <button onClick={() => setViewingOnetAssignment(null)} className="text-gray-400 hover:text-red-500 p-2"><X size={24}/></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-0 bg-white">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-50 text-gray-700 font-bold sticky top-0 border-b">
+                            <tr><th className="p-4">รายชื่อนักเรียน</th><th className="p-4 text-center">สถานะ</th><th className="p-4 text-right">คะแนน</th><th className="p-4 text-right">ส่งเมื่อ</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {students
+                                .filter(s => !viewingOnetAssignment.grade || viewingOnetAssignment.grade === 'ALL' || s.grade === viewingOnetAssignment.grade)
+                                .map(s => {
+                                    const results = stats.filter(r => String(r.studentId) === String(s.id) && r.assignmentId === viewingOnetAssignment.id);
+                                    const result = results.length > 0 ? results[results.length - 1] : undefined;
+                                    return (
+                                        <tr key={s.id} className="hover:bg-indigo-50/30 transition-colors">
+                                            <td className="p-4 flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-lg shadow-sm border">{s.avatar}</div>
+                                                <div>
+                                                    <div className="font-bold text-gray-800">{s.name}</div>
+                                                    <div className="text-xs text-gray-400">ID: {s.id}</div>
+                                                </div>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                {result ? <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto border border-green-200"><CheckCircle size={12}/> ส่งแล้ว</span> 
+                                                : <span className="bg-gray-100 text-gray-400 px-2 py-1 rounded-full text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto"><Clock size={12}/> รอส่ง</span>}
+                                            </td>
+                                            <td className="p-4 text-right">
+                                                {result ? <span className="font-black text-indigo-600 text-lg">{result.score}/{result.totalQuestions}</span> : '-'}
+                                            </td>
+                                            <td className="p-4 text-right text-gray-500 text-xs">
+                                                {result ? new Date(result.timestamp).toLocaleString('th-TH') : '-'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>,
@@ -1096,7 +1093,15 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ teacher, onLogout, 
                                      </div>
                                      <div className="flex items-center gap-2">
                                           <button onClick={() => handleRedoAssignment(a)} className="bg-purple-50 text-purple-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-purple-100 flex items-center gap-1" title="มอบหมายซ้ำ"><Copy size={16}/></button>
-                                          <button onClick={() => handleViewAssignment(a)} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-100">ดูรายละเอียด</button>
+                                          
+                                          {/* ✅ UPDATED: View Score Button with Eye Icon */}
+                                          <button 
+                                              onClick={() => setViewingOnetAssignment(a)} 
+                                              className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-100 flex items-center gap-1"
+                                          >
+                                              <Eye size={16}/> ดูคะแนน
+                                          </button>
+
                                           {!isDirector && <button onClick={() => handleDeleteAssignment(a.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-100"><Trash2 size={16}/></button>}
                                      </div>
                                  </div>
