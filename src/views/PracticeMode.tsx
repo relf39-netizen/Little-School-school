@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Question, Subject } from '../types';
-import { CheckCircle, XCircle, ArrowRight, RefreshCw, ArrowLeft, Volume2, VolumeX } from 'lucide-react';
+/* Added Loader2 to imports from lucide-react */
+import { CheckCircle, XCircle, ArrowRight, ArrowLeft, Volume2, VolumeX, ShieldAlert, RefreshCw, Loader2 } from 'lucide-react';
 import { speak, stopSpeak } from '../utils/soundUtils';
 
 interface PracticeModeProps {
@@ -9,9 +10,10 @@ interface PracticeModeProps {
   onBack: () => void;
   questions: Question[];
   assignmentId?: string; 
+  isExamMode?: boolean; 
 }
 
-const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions: allQuestions, assignmentId }) => {
+const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions: allQuestions, assignmentId, isExamMode = false }) => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
@@ -19,13 +21,11 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
   const [score, setScore] = useState(0);
   const [loading, setLoading] = useState(true);
   
-  // ✅ ใช้ useRef เก็บค่า assignmentId เพื่อให้มั่นใจว่าค่าไม่หายระหว่าง Re-render
   const assignmentIdRef = useRef(assignmentId);
   const [isTTSEnabled, setIsTTSEnabled] = useState(false);
 
   const choiceLabels = ['A', 'B', 'C', 'D']; 
 
-  // อัปเดต ref เมื่อ prop เปลี่ยน
   useEffect(() => {
     if (assignmentId) {
         assignmentIdRef.current = assignmentId;
@@ -33,10 +33,16 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
   }, [assignmentId]);
 
   useEffect(() => {
-    // กระบวนการเตรียมข้อสอบ
     if (allQuestions && allQuestions.length > 0) {
+        // Shuffle questions
         const shuffledQuestions = [...allQuestions].sort(() => 0.5 - Math.random());
-        const limitedQuestions = shuffledQuestions.slice(0, 10);
+        
+        // For practice mode (no assignmentId), limit to 10. 
+        // For assignments, the list should already be prepared.
+        const limit = assignmentId ? shuffledQuestions.length : 10;
+        const limitedQuestions = shuffledQuestions.slice(0, limit);
+        
+        // Shuffle choices for each question
         const finalQuestions = limitedQuestions.map(q => ({
             ...q,
             choices: [...q.choices].sort(() => 0.5 - Math.random())
@@ -47,7 +53,7 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
     } else {
         setLoading(false);
     }
-  }, [allQuestions]);
+  }, [allQuestions, assignmentId]);
 
   const currentQuestion = questions[currentIndex];
 
@@ -55,24 +61,25 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
     if (!currentQuestion) return;
     stopSpeak(); 
     if (isSubmitted) {
-        speak("เฉลย.. " + currentQuestion.explanation);
+        if (!isExamMode) {
+          const correctChoice = currentQuestion.choices.find(c => String(c.id) === String(currentQuestion.correctChoiceId));
+          speak(`เฉลยคือข้อ ${correctChoice?.text || ''}. ${currentQuestion.explanation}`);
+        }
     } else {
-        let textToRead = "คำถาม.. " + currentQuestion.text;
+        let text = `คำถามข้อที่ ${currentIndex + 1}. ${currentQuestion.text}. `;
         currentQuestion.choices.forEach((c, i) => {
-            textToRead += `. ข้อ ${choiceLabels[i]}.. ${c.text}`;
+            text += `ตัวเลือก ${choiceLabels[i]}. ${c.text}. `;
         });
-        speak(textToRead);
+        speak(text);
     }
   };
 
   useEffect(() => {
-    if (isTTSEnabled) {
+    if (isTTSEnabled && !loading && currentQuestion) {
         playAudio();
-    } else {
-        stopSpeak();
     }
     return () => stopSpeak();
-  }, [currentIndex, isSubmitted, isTTSEnabled]);
+  }, [currentIndex, isTTSEnabled, isSubmitted, loading]);
 
   const handleChoiceSelect = (choiceId: string) => {
     if (isSubmitted) return;
@@ -81,14 +88,25 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
 
   const handleSubmit = () => {
     if (!selectedChoice) return;
-    const isCorrect = selectedChoice === currentQuestion.correctChoiceId;
-    setIsSubmitted(true);
+    
+    const isCorrect = String(selectedChoice) === String(currentQuestion.correctChoiceId) || 
+                      selectedChoice.endsWith(String(currentQuestion.correctChoiceId));
     
     if (isCorrect) {
       setScore(prev => prev + 1);
-      if(!isTTSEnabled) speak("ถูกต้องครับ เก่งมาก");
+    }
+
+    if (isExamMode) {
+        // In Exam mode, we record and move on without feedback
+        setIsSubmitted(true);
+        setTimeout(handleNext, 400); // Short delay for visual feedback of selection
     } else {
-      if(!isTTSEnabled) speak("ยังไม่ถูก ไม่เป็นไรครับ ดูเฉลยกัน");
+        setIsSubmitted(true);
+        if (isCorrect) {
+            if (!isTTSEnabled) speak("ถูกต้องครับ!");
+        } else {
+            if (!isTTSEnabled) speak("ยังไม่ถูกครับ ลองดูเฉลยนะ");
+        }
     }
   };
 
@@ -98,191 +116,185 @@ const PracticeMode: React.FC<PracticeModeProps> = ({ onFinish, onBack, questions
       setSelectedChoice(null);
       setIsSubmitted(false);
     } else {
-      // 🟢 ใช้ค่าจาก Ref เพื่อความชัวร์ 100%
-      console.log("Finishing Exam with Assignment ID:", assignmentIdRef.current);
-      onFinish(score, questions.length, assignmentIdRef.current);
+      // Logic for calculating final score on finish
+      const finalScore = score;
+      onFinish(finalScore, questions.length, assignmentIdRef.current);
     }
   };
 
   if (loading) {
-    return <div className="flex justify-center items-center h-64 text-blue-500 font-bold text-xl animate-pulse">กำลังเตรียมชุดข้อสอบ 10 ข้อ...</div>;
+    return (
+        <div className="flex flex-col items-center justify-center min-h-[50vh] text-indigo-600">
+            <Loader2 className="animate-spin mb-4" size={48} />
+            <p className="text-xl font-bold">กำลังเตรียมข้อสอบ...</p>
+        </div>
+    );
   }
 
   if (questions.length === 0) {
     return (
-        <div className="flex flex-col items-center justify-center h-64 text-gray-500">
+        <div className="flex flex-col items-center justify-center h-64 text-gray-500 bg-white rounded-3xl shadow-sm border p-10">
             <p className="text-xl font-bold mb-4">ไม่พบข้อมูลข้อสอบ</p>
-            <button onClick={onBack} className="bg-blue-500 text-white px-4 py-2 rounded-lg">กลับหน้าหลัก</button>
+            <button onClick={onBack} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition">
+                กลับหน้าหลัก
+            </button>
         </div>
     );
   }
 
   const choiceColors = [
-    { base: 'bg-sky-50 border-sky-200 text-sky-800', hover: 'hover:bg-sky-100 hover:border-sky-300 hover:-translate-y-1', selected: 'bg-sky-100 border-sky-500 ring-2 ring-sky-300 shadow-md scale-[1.02]' },
-    { base: 'bg-emerald-50 border-emerald-200 text-emerald-800', hover: 'hover:bg-emerald-100 hover:border-emerald-300 hover:-translate-y-1', selected: 'bg-emerald-100 border-emerald-500 ring-2 ring-emerald-300 shadow-md scale-[1.02]' },
-    { base: 'bg-amber-50 border-amber-200 text-amber-800', hover: 'hover:bg-amber-100 hover:border-amber-300 hover:-translate-y-1', selected: 'bg-amber-100 border-amber-500 ring-2 ring-amber-300 shadow-md scale-[1.02]' },
-    { base: 'bg-rose-50 border-rose-200 text-rose-800', hover: 'hover:bg-rose-100 hover:border-rose-300 hover:-translate-y-1', selected: 'bg-rose-100 border-rose-500 ring-2 ring-rose-300 shadow-md scale-[1.02]' }
+    { base: 'bg-sky-50 border-sky-200 text-sky-800', hover: 'hover:bg-sky-100 hover:border-sky-300', selected: 'bg-sky-100 border-sky-500 ring-4 ring-sky-200' },
+    { base: 'bg-emerald-50 border-emerald-200 text-emerald-800', hover: 'hover:bg-emerald-100 hover:border-emerald-300', selected: 'bg-emerald-100 border-emerald-500 ring-4 ring-emerald-200' },
+    { base: 'bg-amber-50 border-amber-200 text-amber-800', hover: 'hover:bg-amber-100 hover:border-amber-300', selected: 'bg-amber-100 border-amber-500 ring-4 ring-amber-200' },
+    { base: 'bg-rose-50 border-rose-200 text-rose-800', hover: 'hover:bg-rose-100 hover:border-rose-300', selected: 'bg-rose-100 border-rose-500 ring-4 ring-rose-200' }
   ];
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <button onClick={onBack} className="text-gray-500 hover:text-gray-700 flex items-center gap-1">
+    <div className="max-w-3xl mx-auto pb-24 animate-fade-in">
+      {/* Header Bar */}
+      <div className="flex items-center justify-between mb-6 bg-white/50 p-3 rounded-2xl backdrop-blur-sm border border-white/50 shadow-sm">
+        <button onClick={onBack} className="text-gray-500 hover:text-indigo-600 flex items-center gap-1 font-bold transition">
           <ArrowLeft size={20} /> ออก
         </button>
-        <div className="flex-1 mx-4 bg-gray-200 rounded-full h-3">
+        <div className="flex-1 mx-4 bg-gray-200 rounded-full h-3 overflow-hidden">
           <div 
-            className="bg-blue-500 h-3 rounded-full transition-all duration-500"
-            style={{ width: `${((currentIndex) / questions.length) * 100}%` }}
+            className={`h-full transition-all duration-500 shadow-inner ${isExamMode ? 'bg-red-500' : 'bg-indigo-600'}`}
+            style={{ width: `${((currentIndex + (isSubmitted && isExamMode ? 1 : 0)) / questions.length) * 100}%` }}
           ></div>
         </div>
-        <span className="font-bold text-gray-600 text-sm">
-          {currentIndex + 1} / {questions.length}
-        </span>
+        <div className="flex items-center gap-2 font-black text-indigo-900">
+           {currentIndex + 1} <span className="text-gray-400 font-bold">/</span> {questions.length}
+        </div>
       </div>
 
-      <div className="bg-white rounded-3xl shadow-lg p-6 md:p-8 mb-6 border-b-4 border-gray-200">
-        <div className="flex justify-between items-start mb-3">
-            <div className="inline-block bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">
-            {currentQuestion.subject}
+      {/* Main Question Card */}
+      <div className={`bg-white rounded-[40px] shadow-2xl p-6 md:p-10 mb-6 border-b-[12px] relative transition-all duration-300 ${isExamMode ? 'border-red-100' : 'border-indigo-100'}`}>
+        
+        {/* Badge & TTS */}
+        <div className="flex justify-between items-center mb-6">
+            <div className={`px-4 py-1.5 rounded-full font-black text-xs flex items-center gap-2 ${isExamMode ? 'bg-red-600 text-white shadow-lg animate-pulse' : 'bg-indigo-100 text-indigo-700'}`}>
+                {isExamMode ? <><ShieldAlert size={14}/> OFFICIAL EXAM</> : currentQuestion.subject}
             </div>
-            
             <button 
-               onClick={() => setIsTTSEnabled(!isTTSEnabled)} 
-               className={`p-2 rounded-full transition-all border-2 ${isTTSEnabled ? 'bg-blue-100 text-blue-600 border-blue-200 shadow-inner' : 'bg-gray-100 text-gray-400 border-transparent hover:bg-gray-200'}`}
-               title={isTTSEnabled ? "ปิดเสียงอ่านอัตโนมัติ" : "เปิดเสียงอ่านอัตโนมัติ"}
+                onClick={() => setIsTTSEnabled(!isTTSEnabled)}
+                className={`p-3 rounded-2xl transition-all border-2 ${isTTSEnabled ? 'bg-indigo-600 text-white border-indigo-700 shadow-lg' : 'bg-gray-50 text-gray-400 border-gray-100 hover:bg-gray-100'}`}
+                title="อ่านโจทย์"
             >
-               {isTTSEnabled ? <Volume2 size={24} className="animate-pulse" /> : <VolumeX size={24} />}
+                {isTTSEnabled ? <Volume2 size={24} /> : <VolumeX size={24} />}
             </button>
         </div>
         
-        <div className="flex items-start gap-2 mb-4">
-            <h2 className="text-xl md:text-2xl font-bold text-gray-800 leading-relaxed flex-1">
-                {currentQuestion.text}
-            </h2>
-            <button 
-                onClick={() => speak(currentQuestion.text)} 
-                className="p-2 text-gray-400 hover:text-blue-500 bg-gray-50 hover:bg-blue-50 rounded-full transition-colors flex-shrink-0"
-                title="อ่านโจทย์"
-            >
-                <Volume2 size={24} />
-            </button>
-        </div>
+        <h2 className="text-2xl md:text-3xl font-black text-gray-800 mb-8 leading-tight">
+          {currentQuestion.text}
+        </h2>
 
         {currentQuestion.image && (
-          <div className="mb-6 rounded-xl overflow-hidden border-2 border-gray-100">
-            <img src={currentQuestion.image} alt="Question" className="w-full h-auto object-contain max-h-60 bg-gray-50" />
+          <div className="mb-8 rounded-3xl overflow-hidden border-4 border-gray-50 shadow-inner bg-gray-50">
+            <img src={currentQuestion.image} alt="Question" className="w-full h-auto object-contain max-h-[300px]" />
           </div>
         )}
 
-        <div className="space-y-4">
+        {/* Choice Grid */}
+        <div className="grid gap-4">
           {currentQuestion.choices.map((choice, index) => {
-            const colorTheme = choiceColors[index % 4]; 
-            const label = choiceLabels[index] || (index + 1).toString();
+            const theme = choiceColors[index % 4];
+            const label = choiceLabels[index];
+            const isSelected = selectedChoice === choice.id;
+            const isCorrect = String(choice.id) === String(currentQuestion.correctChoiceId) || choice.id.endsWith(String(currentQuestion.correctChoiceId));
             
-            let buttonStyle = `border-2 shadow-sm transition-all duration-200 relative flex items-center gap-4 ${colorTheme.base} ${colorTheme.hover}`;
-            let badgeStyle = "bg-white border-2 border-white/50 text-gray-500";
+            let btnClass = `w-full p-5 rounded-3xl text-left text-xl font-bold border-2 transition-all duration-200 relative flex items-center gap-5 shadow-sm ${theme.base} ${theme.hover}`;
+            let badgeClass = "w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl transition-colors bg-white shadow-inner border border-gray-100";
 
-            if (selectedChoice === choice.id) {
-              buttonStyle = `border-2 shadow-md font-bold ${colorTheme.selected}`;
-              badgeStyle = "bg-white text-blue-600 border-blue-200 shadow-inner";
+            if (isSelected) {
+                btnClass = `w-full p-5 rounded-3xl text-left text-xl font-black border-2 transition-all duration-200 relative flex items-center gap-5 shadow-xl scale-[1.02] ${theme.selected}`;
+                badgeClass = "w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl transition-colors bg-indigo-600 text-white shadow-lg";
             }
 
-            if (isSubmitted) {
-              if (choice.id === currentQuestion.correctChoiceId) {
-                buttonStyle = "border-2 border-green-500 bg-green-100 text-green-900 shadow-md scale-[1.02]";
-                badgeStyle = "bg-green-500 text-white border-transparent";
-              } else if (choice.id === selectedChoice) {
-                buttonStyle = "border-2 border-red-500 bg-red-100 text-red-900 opacity-80";
-                badgeStyle = "bg-red-500 text-white border-transparent";
-              } else {
-                buttonStyle = "border-2 border-gray-100 bg-gray-50 text-gray-400 opacity-50 grayscale";
-                badgeStyle = "bg-gray-200 text-gray-400";
-              }
+            // Practice Mode Feedback
+            if (isSubmitted && !isExamMode) {
+                if (isCorrect) {
+                    btnClass = "w-full p-5 rounded-3xl text-left text-xl font-black border-4 border-green-500 bg-green-50 text-green-900 shadow-xl scale-[1.02] flex items-center gap-5";
+                    badgeClass = "w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl bg-green-500 text-white shadow-lg";
+                } else if (isSelected) {
+                    btnClass = "w-full p-5 rounded-3xl text-left text-xl font-bold border-4 border-red-500 bg-red-50 text-red-900 opacity-80 flex items-center gap-5";
+                    badgeClass = "w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl bg-red-500 text-white shadow-lg";
+                } else {
+                    btnClass = "w-full p-5 rounded-3xl text-left text-xl font-medium border-2 border-gray-100 bg-gray-50 text-gray-300 grayscale opacity-40 flex items-center gap-5";
+                    badgeClass = "w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl bg-gray-200 text-gray-400";
+                }
             }
 
             return (
-              <div
+              <button
                 key={choice.id}
-                role="button"
-                onClick={() => !isSubmitted && handleChoiceSelect(choice.id)}
-                className={`w-full p-3 md:p-4 rounded-2xl text-left text-lg ${buttonStyle} ${!isSubmitted ? 'cursor-pointer' : ''}`}
+                onClick={() => handleChoiceSelect(choice.id)}
+                disabled={isSubmitted}
+                className={btnClass}
               >
-                <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg transition-colors ${badgeStyle}`}>
+                <div className={badgeClass}>
                    {label}
                 </div>
-
-                <div className="flex-1 min-w-0">
-                  {choice.image ? (
-                     <div className="flex items-center gap-3 w-full">
-                        <img src={choice.image} alt="choice" className="w-16 h-16 rounded object-cover border bg-white" />
-                        <span className="font-medium truncate">{choice.text}</span>
-                     </div>
-                  ) : (
-                     <span className="font-medium break-words">{choice.text}</span>
-                  )}
+                <div className="flex-1">
+                    {choice.image ? (
+                        <div className="flex items-center gap-4">
+                            <img src={choice.image} alt="Choice" className="w-16 h-16 rounded-xl object-cover border bg-white shadow-sm" />
+                            <span>{choice.text}</span>
+                        </div>
+                    ) : (
+                        <span>{choice.text}</span>
+                    )}
                 </div>
-
-                <button 
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        speak(choice.text);
-                    }}
-                    className="p-2 rounded-full text-gray-400 hover:text-blue-600 hover:bg-white/50 transition-colors z-10 ml-2"
-                    title="อ่านตัวเลือก"
-                >
-                    <Volume2 size={20} />
-                </button>
-
-                {isSubmitted && choice.id === currentQuestion.correctChoiceId && (
-                  <CheckCircle className="text-green-600 absolute right-12 drop-shadow-sm" size={28} />
+                {isSubmitted && !isExamMode && isCorrect && (
+                    <CheckCircle className="text-green-600 drop-shadow-md shrink-0" size={32} />
                 )}
-                {isSubmitted && choice.id === selectedChoice && choice.id !== currentQuestion.correctChoiceId && (
-                  <XCircle className="text-red-500 absolute right-12 drop-shadow-sm" size={28} />
+                {isSubmitted && !isExamMode && isSelected && !isCorrect && (
+                    <XCircle className="text-red-500 drop-shadow-md shrink-0" size={32} />
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 md:static md:bg-transparent md:border-0 md:p-0 z-20">
+      {/* Action Footer */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-gray-100 md:static md:bg-transparent md:border-0 md:p-0 z-40">
         <div className="max-w-3xl mx-auto">
           {!isSubmitted ? (
             <button
               onClick={handleSubmit}
               disabled={!selectedChoice}
-              className={`w-full py-3 rounded-2xl font-bold text-xl shadow-lg transition-all transform active:scale-95 ${
+              className={`w-full py-5 rounded-[24px] font-black text-2xl shadow-2xl transition-all transform active:scale-95 ${
                 selectedChoice 
-                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-blue-200' 
+                  ? (isExamMode ? 'bg-red-600 text-white shadow-red-200' : 'bg-indigo-600 text-white shadow-indigo-200')
                   : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }`}
             >
-              ส่งคำตอบ
+              {isExamMode ? 'ยืนยันคำตอบ' : 'ส่งคำตอบ'}
             </button>
           ) : (
-            <div className="space-y-4">
-              <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-5 animate-fade-in shadow-sm relative">
-                <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-bold text-green-800 flex items-center gap-2 text-lg">
-                    <CheckCircle size={24} /> เฉลย
-                    </h3>
-                    <button 
-                        onClick={() => speak(currentQuestion.explanation)}
-                        className="p-2 bg-white rounded-full text-green-600 hover:bg-green-100 shadow-sm border border-green-100 transition-colors"
-                        title="อ่านคำอธิบาย"
-                    >
-                        <Volume2 size={20} />
-                    </button>
-                </div>
-                <p className="text-green-800 text-base leading-relaxed">{currentQuestion.explanation}</p>
-              </div>
-              <button
-                onClick={handleNext}
-                className="w-full py-3 rounded-2xl font-bold text-xl shadow-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 transition-all flex items-center justify-center gap-2 shadow-blue-200"
-              >
-                {currentIndex < questions.length - 1 ? 'ข้อต่อไป' : 'ดูผลลัพธ์'} <ArrowRight size={24} />
-              </button>
+            <div className="space-y-4 animate-fade-in">
+              {!isExamMode && (
+                  <div className="bg-green-50 border-l-[8px] border-green-500 rounded-3xl p-6 shadow-lg">
+                    <div className="flex justify-between items-start mb-2">
+                        <h3 className="font-black text-green-800 flex items-center gap-2 text-xl">
+                          <CheckCircle size={24} /> เฉลย
+                        </h3>
+                        <button onClick={() => speak(currentQuestion.explanation)} className="p-2 bg-white rounded-xl text-green-600 shadow-sm border border-green-100 hover:bg-green-100 transition">
+                            <Volume2 size={20}/>
+                        </button>
+                    </div>
+                    <p className="text-green-900 text-lg leading-relaxed font-medium">{currentQuestion.explanation}</p>
+                  </div>
+              )}
+              
+              {!isExamMode && (
+                  <button
+                    onClick={handleNext}
+                    className="w-full py-5 rounded-[24px] font-black text-2xl shadow-2xl bg-indigo-600 text-white hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 border-b-8 border-indigo-800"
+                  >
+                    {currentIndex < questions.length - 1 ? 'ข้อต่อไป' : 'ดูสรุปผลคะแนน'} <ArrowRight size={28} />
+                  </button>
+              )}
             </div>
           )}
         </div>
