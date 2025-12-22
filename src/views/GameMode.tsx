@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Student, Question } from '../types';
-import { Users, Trophy, Play, CheckCircle, Volume2, VolumeX, Crown, LogIn, Loader2, RefreshCw, AlertTriangle, AlertCircle, Wifi, WifiOff, XCircle, Zap, Sparkles, BarChart3, Clock, LayoutDashboard, ChevronDown } from 'lucide-react';
+import { Users, Trophy, Play, CheckCircle, Volume2, VolumeX, Crown, LogIn, Loader2, RefreshCw, AlertTriangle, AlertCircle, Wifi, WifiOff, XCircle, Zap, Sparkles, BarChart3, Clock, LayoutDashboard, ChevronDown, List } from 'lucide-react';
 import { speak, playBGM, stopBGM, playSFX, toggleMuteSystem, stopSpeak } from '../utils/soundUtils';
 import { supabase } from '../services/firebaseConfig';
 
@@ -279,7 +279,6 @@ const GameMode: React.FC<GameModeProps> = ({ student, initialRoomCode, onExit, o
     fetchPlayers(roomCode);
   };
 
-  // Fixed: Implemented handleJoinGame to fix "Cannot find name 'handleJoinGame'" error
   const handleJoinGame = async () => {
     if (inputPin.length < 6) {
         setJoinError("กรุณากรอกรหัส PIN ให้ครบ 6 หลัก");
@@ -594,6 +593,7 @@ const GameMode: React.FC<GameModeProps> = ({ student, initialRoomCode, onExit, o
             <h1 className="text-5xl font-black text-indigo-900 mb-4 drop-shadow-sm">The Winners!</h1>
             <p className="text-indigo-400 font-bold text-xl mb-12">การแข่งขันสิ้นสุดลงแล้ว</p>
             
+            {/* Podium Section */}
             <div className="flex flex-col md:flex-row items-end justify-center gap-4 mb-16 w-full max-w-4xl">
                  {sortedPlayers[1] && (
                      <div className="bg-white rounded-[32px] p-6 shadow-xl border-b-8 border-gray-200 flex flex-col items-center w-full md:w-56 order-2 md:order-1 transform hover:-translate-y-2 transition">
@@ -619,6 +619,47 @@ const GameMode: React.FC<GameModeProps> = ({ student, initialRoomCode, onExit, o
                          <div className="bg-orange-100 px-4 py-1 rounded-full font-black text-orange-500 text-sm">{sortedPlayers[2].score}</div>
                      </div>
                  )}
+            </div>
+
+            {/* ✅ Full Summary Ranking List */}
+            <div className="w-full max-w-2xl bg-white rounded-[32px] p-6 shadow-xl border-2 border-indigo-50 mb-12">
+                <h3 className="text-xl font-black text-indigo-900 mb-6 flex items-center justify-center gap-2 border-b pb-4">
+                    <List className="text-indigo-600"/> สรุปลำดับคะแนนทั้งหมด
+                </h3>
+                <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                    {sortedPlayers.map((p, i) => (
+                        <div 
+                            key={p.student_id} 
+                            className={`flex items-center justify-between p-3 px-6 rounded-2xl border-2 transition-all ${
+                                i === 0 ? 'bg-yellow-50 border-yellow-300' : 
+                                i === 1 ? 'bg-gray-50 border-gray-300' : 
+                                i === 2 ? 'bg-orange-50 border-orange-200' : 
+                                'bg-white border-gray-100'
+                            } ${String(p.student_id) === String(student.id) ? 'ring-4 ring-indigo-200' : ''}`}
+                        >
+                            <div className="flex items-center gap-4">
+                                <span className={`font-black w-8 text-center ${i < 3 ? 'text-xl' : 'text-gray-400 text-sm'}`}>
+                                    {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
+                                </span>
+                                <span className="text-3xl">{p.avatar}</span>
+                                <div className="text-left">
+                                    <div className="font-black text-gray-800 text-sm">{p.name}</div>
+                                    <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Rank #{i+1}</div>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <span className="font-black text-indigo-600 text-xl">{p.score}</span>
+                                <span className="text-[10px] font-black text-indigo-300 uppercase ml-1">Pts</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                {sortedPlayers.length > 5 && (
+                     <div className="text-center mt-4 text-gray-300 flex flex-col items-center gap-1">
+                         <ChevronDown size={16} className="animate-bounce"/>
+                         <span className="text-[10px] font-bold uppercase tracking-widest">เลื่อนดูอันดับอื่นๆ</span>
+                     </div>
+                )}
             </div>
 
             <div className="flex flex-wrap justify-center gap-4">
